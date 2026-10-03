@@ -1,0 +1,24 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Hiragino Sans", "Noto Sans JP", "Yu Gothic UI", system-ui, sans-serif;
+}
+
+body {
+  @apply bg-[#f3f1ec] text-slate-800;
+}
+
+/* 参考の見た目: 白い角丸カードに柔らかい影 */
+.station-label,
+.panel {
+  box-shadow:
+    0 1px 2px rgb(40 30 20 / 0.08),
+    0 6px 16px rgb(40 30 20 / 0.12);
+}
+
+/* iPhone は 16px 未満の入力欄をタップすると画面が拡大されるため、スマホでは 16px にする */
+@media (max-width: 767px) {
+  input {
+    font-size: 16px !important;
+  }
+}
