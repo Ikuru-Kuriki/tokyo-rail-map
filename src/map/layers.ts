@@ -40,15 +40,20 @@ const MUTED: [number, number, number] = [214, 211, 205];
 
 export interface LayerState {
   route: Route | null;
-  from: Place | null;
-  to: Place | null;
+  /** 出発・到着など、黒い点で示す駅 */
+  endpoints: Place[];
+  /** 駅ごとの色（終電マップ）。指定がない駅は「帰れない」色 */
+  stationColors: Map<string, [number, number, number]> | null;
   onPick: (place: Place) => void;
 }
 
-export function buildLayers({ route, from, to, onPick }: LayerState): Layer[] {
+const UNREACHABLE: [number, number, number] = [201, 197, 189];
+
+export function buildLayers({ route, endpoints: ends, stationColors, onPick }: LayerState): Layer[] {
   const routeStations = new Set(route?.legs.flatMap((l) => l.stations));
-  const highlighting = route !== null;
-  const endpoints = new Set([...(from?.stations ?? []), ...(to?.stations ?? [])]);
+  const highlighting = route !== null || stationColors !== null;
+  const endpoints = new Set(ends.flatMap((p) => p.stations));
+  const coloring = stationColors !== null && route === null;
 
   const routePaths: PathDatum[] = (route?.legs ?? []).map((l, i) => ({
     id: `${l.railway}#${i}`,
@@ -96,7 +101,7 @@ export function buildLayers({ route, from, to, onPick }: LayerState): Layer[] {
       jointRounded: true,
       capRounded: true,
       parameters: { depthCompare: 'always' },
-      updateTriggers: { getColor: [route] },
+      updateTriggers: { getColor: [highlighting] },
     }),
     new PathLayer<PathDatum>({
       id: 'route',
@@ -114,20 +119,32 @@ export function buildLayers({ route, from, to, onPick }: LayerState): Layer[] {
       data: network.stations,
       pickable: true,
       getPosition: (s) => [s.coord[0], s.coord[1], LINE_ELEVATION],
-      getRadius: (s) =>
-        endpoints.has(s.id) ? 6 : routeStations.has(s.id) ? 4 : highlighting ? 1.6 : 2.6,
+      getRadius: (s) => {
+        if (endpoints.has(s.id)) return 6;
+        if (routeStations.has(s.id)) return 4;
+        if (coloring) return stationColors.has(s.id) ? 3.6 : 1.8;
+        return highlighting ? 1.6 : 2.6;
+      },
       radiusUnits: 'pixels',
       stroked: true,
-      getFillColor: (s) =>
-        endpoints.has(s.id) ? [30, 30, 30, 255] : [255, 255, 255, highlighting && !routeStations.has(s.id) ? 160 : 255],
-      getLineColor: (s) => [30, 30, 30, highlighting && !routeStations.has(s.id) && !endpoints.has(s.id) ? 70 : 230],
+      getFillColor: (s) => {
+        if (endpoints.has(s.id)) return [30, 30, 30, 255];
+        if (coloring) return [...(stationColors.get(s.id) ?? UNREACHABLE), 255];
+        return [255, 255, 255, highlighting && !routeStations.has(s.id) ? 160 : 255];
+      },
+      // 色付きの点は地面色の細い縁で隣と分ける
+      getLineColor: (s) => {
+        if (endpoints.has(s.id)) return [30, 30, 30, 230];
+        if (coloring) return [255, 255, 255, 230];
+        return [30, 30, 30, highlighting && !routeStations.has(s.id) ? 70 : 230];
+      },
       getLineWidth: 1.2,
       lineWidthUnits: 'pixels',
       parameters: { depthCompare: 'always' },
       updateTriggers: {
-        getRadius: [route, from, to],
-        getFillColor: [route, from, to],
-        getLineColor: [route, from, to],
+        getRadius: [route, ends, stationColors],
+        getFillColor: [route, ends, stationColors],
+        getLineColor: [route, ends, stationColors],
       },
       onClick: (info) => {
         const place = info.object ? placeByStation.get(info.object.id) : undefined;
