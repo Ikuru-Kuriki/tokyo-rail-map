@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "typecheck": "tsc -b",
     "test": "vitest run",
-    "data": "node scripts/build-data.ts"
+    "data": "node scripts/build-data.ts",
+    "timetable": "node scripts/build-timetable.ts"
   },
   "dependencies": {
     "@deck.gl/core": "^9.4.0",

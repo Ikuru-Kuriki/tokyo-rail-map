@@ -28,8 +28,12 @@ const VIEW = new MapView({ repeat: false });
 
 interface Props {
   route: Route | null;
-  from: Place | null;
-  to: Place | null;
+  /** 黒いラベル・点で示す駅（出発・到着、帰る駅など） */
+  endpoints: Place[];
+  /** 終電マップの駅の色 */
+  stationColors?: Map<string, [number, number, number]> | null;
+  /** ラベルに添える時刻（place ID → "0:12"） */
+  placeTimes?: Map<string, string> | null;
   onPick: (place: Place) => void;
 }
 
@@ -47,7 +51,7 @@ function useSize(ref: React.RefObject<HTMLDivElement | null>) {
   return size;
 }
 
-export function RailMap({ route, from, to, onPick }: Props) {
+export function RailMap({ route, endpoints, stationColors = null, placeTimes = null, onPick }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const { width, height } = useSize(ref);
   const [viewState, setViewState] = useState<MapViewState>(INITIAL_VIEW);
@@ -83,7 +87,11 @@ export function RailMap({ route, from, to, onPick }: Props) {
     }));
   }, [route, width, height]);
 
-  const layers = useMemo(() => buildLayers({ route, from, to, onPick }), [route, from, to, onPick]);
+  const layers = useMemo(
+    () => buildLayers({ route, endpoints, stationColors, onPick }),
+    [route, endpoints, stationColors, onPick],
+  );
+  const endpointIds = useMemo(() => new Set(endpoints.map((p) => p.id)), [endpoints]);
 
   const labels = useMemo(() => {
     if (!width || !height) return [];
@@ -98,14 +106,15 @@ export function RailMap({ route, from, to, onPick }: Props) {
       const [x, y] = viewport.project([p.coord[0], p.coord[1], LINE_ELEVATION]);
       let priority = p.lines;
       if (routePlaces.has(p.id)) priority += 100;
-      const pinned = p.id === from?.id || p.id === to?.id;
+      const pinned = endpointIds.has(p.id);
       if (pinned) priority += 200;
       if (priority < minLines) continue;
-      candidates.push({ id: p.id, ja: p.ja, en: p.en.toUpperCase(), x: x!, y: y!, priority, pinned });
+      const time = placeTimes?.get(p.id);
+      candidates.push({ id: p.id, ja: p.ja, en: p.en.toUpperCase(), time, x: x!, y: y!, priority, pinned });
     }
     const max = Math.round((width * height) / 22000);
     return placeLabels(candidates, width, height, max);
-  }, [viewState, width, height, route, from, to]);
+  }, [viewState, width, height, route, endpointIds, placeTimes]);
 
   return (
     <div ref={ref} className="absolute inset-0 overflow-hidden" style={{ background: BACKGROUND }}>
@@ -119,14 +128,19 @@ export function RailMap({ route, from, to, onPick }: Props) {
       />
       <div className="pointer-events-none absolute inset-0">
         {labels.map((l) => {
-          const active = l.id === from?.id || l.id === to?.id;
+          const active = endpointIds.has(l.id);
           return (
             <div
               key={l.id}
               className={`station-label absolute flex flex-col items-center justify-center rounded-lg ${active ? 'bg-slate-900 text-white' : 'bg-white text-slate-900'}`}
               style={{ left: l.left, top: l.top, width: l.width, height: l.height }}
             >
-              <span className="text-[15px] leading-tight font-bold">{l.ja}</span>
+              <span className="text-[15px] leading-tight font-bold">
+                {l.ja}
+                {l.time && (
+                  <span className={`ml-1.5 tabular-nums ${active ? 'text-sky-300' : 'text-[#1c5cab]'}`}>{l.time}</span>
+                )}
+              </span>
               <span
                 className={`text-[10px] leading-tight font-semibold tracking-[0.12em] ${active ? 'text-slate-300' : 'text-slate-400'}`}
               >
