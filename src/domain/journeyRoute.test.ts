@@ -45,7 +45,32 @@ describe('journeyToRoute', () => {
       },
       fixture,
     );
-    expect(route.legs.map((l) => l.railway)).toEqual(['A']);
+    // 乗り入れ駅（A.3 と B.2 は同じ駅）から先の B 線の区間も描く
+    expect(route.legs).toEqual([
+      { railway: 'A', stations: ['A.2', 'A.3'] },
+      { railway: 'B', stations: ['B.2', 'B.3'] },
+    ]);
     expect(route.transfers).toBe(0);
+  });
+
+  it('2 回乗り入れる列車でも、すべての区間がつながる', () => {
+    // A 線 → B 線 → C 線（A.3 = B.2、B.3 = C.1 が同じ駅）
+    const net = {
+      ...fixture,
+      places: fixture.places.map((p) => (p.id === 'C.1' ? { ...p, stations: ['C.1', 'B.3'] } : p)),
+    };
+    const route = journeyToRoute(
+      {
+        dep: 0,
+        arr: 10,
+        legs: [{ kind: 'ride', stops: ['A.1', 'A.3', 'B.3', 'C.2'], dep: 0, arr: 10, destination: '' }],
+      },
+      net,
+    );
+    expect(route.legs).toEqual([
+      { railway: 'A', stations: ['A.1', 'A.2', 'A.3'] },
+      { railway: 'B', stations: ['B.2', 'B.3'] },
+      { railway: 'C', stations: ['C.1', 'C.2'] },
+    ]);
   });
 });
