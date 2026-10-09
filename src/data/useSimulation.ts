@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { network, stationById } from '.';
 import { buildFootpaths } from '../domain/lastTrain';
-import { arrivalCandidates, journeyCandidates, type SimJourney } from '../domain/simulate';
+import { arrivalCandidates, journeyCandidates, type Connections, type SimJourney } from '../domain/simulate';
 import { baseMinutes, type SimRouteInput, type TimeKind } from '../domain/simRoutes';
 import type { DayType } from '../domain/timetableTypes';
 import { loadConnections } from './dayTimetable';
@@ -18,6 +18,8 @@ export type SimulationState =
       candidates: { journey: SimJourney; labels: string[] }[][];
       /** 経路ごとの基準の時刻（出発指定なら出発時刻、到着指定なら締切） */
       starts: (number | null)[];
+      /** 読み込んだ時刻表（区間ごとに列車を選び直すときに使う） */
+      connections: Connections;
     };
 
 const railwayOf = (id: string) => stationById.get(id)?.railway ?? '';
@@ -62,7 +64,7 @@ export function useSimulation(
         const candidates = routes.map((r, i) =>
           usable[i] ? find(conns, footpaths, r.from!.stations, r.to!.stations, starts[i]!, railwayOf) : [],
         );
-        setState({ status: 'ready', kind, candidates, starts });
+        setState({ status: 'ready', kind, candidates, starts, connections: conns });
       },
       (e: unknown) => alive && setState({ status: 'error', message: e instanceof Error ? e.message : String(e) }),
     );

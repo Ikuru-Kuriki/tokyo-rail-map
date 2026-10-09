@@ -112,12 +112,12 @@ export function buildLayers({
   };
 
   const radius = (s: Station) => {
-    if (endpoints.has(s.id)) return 6;
-    if (routeStations.has(s.id)) return 4;
-    if (coloring) return stationColors.has(s.id) ? 3.6 : 1.8;
+    if (endpoints.has(s.id)) return 8;
+    if (routeStations.has(s.id)) return 5.5;
+    if (coloring) return stationColors.has(s.id) ? 5 : 2.6;
     // 路線を強調中は、ほかの路線の駅の点は出さない
     if (dimmed(s)) return 0;
-    return highlighting ? 1.6 : 2.6;
+    return highlighting ? 2.6 : 4;
   };
   const fill = (s: Station): [number, number, number, number] => {
     if (endpoints.has(s.id)) return [30, 30, 30, 255];
@@ -174,6 +174,9 @@ export function buildLayers({
       id: 'stations',
       data: network.stations,
       pickable: true,
+      // カーソルを乗せた駅を少し強調する
+      autoHighlight: true,
+      highlightColor: [30, 30, 30, 90],
       getPosition: dotPosition,
       getRadius: radius,
       radiusUnits: 'pixels',
@@ -181,7 +184,7 @@ export function buildLayers({
       stroked: true,
       getFillColor: fill,
       getLineColor: stroke,
-      getLineWidth: 1.2,
+      getLineWidth: 1.5,
       lineWidthUnits: 'pixels',
       updateTriggers: {
         getPosition: scale,
@@ -275,7 +278,7 @@ export function buildLayers({
       stroked: true,
       getFillColor: fill,
       getLineColor: stroke,
-      getLineWidth: 1.2,
+      getLineWidth: 1.5,
       lineWidthUnits: 'pixels',
       parameters: { depthCompare: 'always' },
       updateTriggers: {

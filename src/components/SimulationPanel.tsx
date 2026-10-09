@@ -1,8 +1,9 @@
-import { useId } from 'react';
-import { railwayById, stationById } from '../data';
+import { useId, useState } from 'react';
+import { network, placeByStation, railwayById, stationById } from '../data';
 import type { SimulationState } from '../data/useSimulation';
 import { formatMinutes } from '../domain/lastTrain';
-import type { SimJourney } from '../domain/simulate';
+import { earliestBoarding, replaceRide, trainsBetween, type Connections, type SimJourney } from '../domain/simulate';
+import { buildFootpaths } from '../domain/lastTrain';
 import type { SimRouteInput, StartMode, TimeKind } from '../domain/simRoutes';
 import type { DayType } from '../domain/timetableTypes';
 import type { Place } from '../domain/types';
@@ -23,6 +24,13 @@ interface Props {
   /** 経路ごとに選んだ候補の番号（無ければ 0 = 最速） */
   choice: number[];
   onChoose: (route: number, index: number) => void;
+  /** 経路ごとに今使っている行き方（区間ごとに選び直したものを含む） */
+  journeys: (SimJourney | null)[];
+  /** 区間ごとに列車を選び直した行き方 */
+  onCustomize: (route: number, journey: SimJourney) => void;
+  /** 区間ごとに選び直した経路（true の経路）と、元に戻す操作 */
+  customized: boolean[];
+  onResetCustom: (route: number) => void;
   onSlot: (slot: SimSlot) => void;
   onChange: (index: number, patch: Partial<SimRouteInput>) => void;
   onAdd: () => void;
@@ -130,16 +138,88 @@ function CandidateList({
   );
 }
 
+const footpaths = buildFootpaths(network);
+const placeStations = (stationId: string) => placeByStation.get(stationId)?.stations ?? [stationId];
+
+/** ある乗車区間に乗れるほかの列車の一覧。選ぶとその先の乗換を組み直す */
+function LegTrainPicker({
+  connections,
+  journey,
+  legIndex,
+  toStations,
+  arrive,
+  deadline,
+  onPick,
+}: {
+  connections: Connections;
+  journey: SimJourney;
+  legIndex: number;
+  toStations: string[];
+  arrive: boolean;
+  deadline: number | null;
+  onPick: (journey: SimJourney) => void;
+}) {
+  const leg = journey.legs[legIndex]!;
+  if (leg.kind !== 'ride') return null;
+  const first = leg.hops[0]!;
+  const last = leg.hops[leg.hops.length - 1]!;
+  // 最初の乗車は指定の時刻（到着指定なら 30 分前）から、2 つめ以降は前の区間に着いて乗り換えられる時刻から
+  const after = earliestBoarding(journey, legIndex) ?? (arrive ? journey.dep - 30 : journey.start);
+  const options = trainsBetween(connections, placeStations(first.from), placeStations(last.to), after, 8)
+    .map((train) => ({ train, result: replaceRide(connections, footpaths, journey, legIndex, train, toStations) }))
+    .filter((o): o is { train: typeof o.train; result: SimJourney } => o.result !== null);
+  if (options.length === 0) return <p className="py-1 text-slate-500">ほかに乗れる列車はありません。</p>;
+  return (
+    <ul className="mt-1 mb-1.5 space-y-1 border-l-2 border-slate-200 pl-2">
+      {options.map(({ train, result }) => {
+        const current = train.trip === leg.trip && train.dep === first.dep;
+        const late = deadline !== null && result.arr > deadline;
+        const r = railwayById.get(stationById.get(train.hops[0]!.from)!.railway)!;
+        return (
+          <li key={`${train.trip}@${train.dep}`}>
+            <button
+              type="button"
+              aria-pressed={current}
+              className={`flex w-full flex-wrap items-center gap-x-1.5 rounded-md border px-2 py-1 text-left ${current ? 'border-slate-900 bg-slate-50' : 'border-slate-200 hover:bg-slate-50'}`}
+              onClick={() => onPick(result)}
+            >
+              <span className="font-bold text-slate-900 tabular-nums">
+                {formatMinutes(train.dep)}→{formatMinutes(train.arr)}
+              </span>
+              <span className="font-semibold" style={{ color: r.color }}>
+                {r.ja}
+              </span>
+              {train.destination && <span>{train.destination}行</span>}
+              <span className={`ml-auto tabular-nums ${late ? 'font-semibold text-red-700' : 'text-slate-500'}`}>
+                最終 {formatMinutes(result.arr)} 着{late && '（遅れる）'}
+              </span>
+            </button>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 function JourneySummary({
   journey,
   start,
   deadline,
+  connections,
+  toStations,
+  arrive,
+  onCustomize,
 }: {
   journey: SimJourney | null;
   start: number | null;
   /** 到着指定のときの締切 */
   deadline: number | null;
+  connections: Connections | null;
+  toStations: string[];
+  arrive: boolean;
+  onCustomize: (journey: SimJourney) => void;
 }) {
+  const [openLeg, setOpenLeg] = useState<number | null>(null);
   if (!journey)
     return (
       <p className="text-xs text-slate-500">
@@ -158,18 +238,47 @@ function JourneySummary({
         {deadline !== null && `・${formatMinutes(deadline)} までに到着`}）
       </p>
       <ol className="space-y-0.5">
-        {rides.map((l, i) => {
+        {journey.legs.map((l, legIndex) => {
+          if (l.kind !== 'ride') return null;
+          const open = openLeg === legIndex;
           return (
-            <li key={i} className="flex flex-wrap items-center gap-1">
-              <span className="tabular-nums">{formatMinutes(l.hops[0]!.dep)}</span>
-              <StationName id={l.hops[0]!.from} />
-              {railwaysOfRide(l.hops).map((r, n) => (
-                <span key={r.id} className="font-semibold" style={{ color: r.color }}>
-                  {n > 0 && <span className="text-slate-400">→</span>}
-                  {r.ja}
-                </span>
-              ))}
-              {l.destination && <span>{l.destination}行</span>}
+            <li key={legIndex}>
+              <div className="flex flex-wrap items-center gap-1">
+                <span className="tabular-nums">{formatMinutes(l.hops[0]!.dep)}</span>
+                <StationName id={l.hops[0]!.from} />
+                {railwaysOfRide(l.hops).map((r, n) => (
+                  <span key={r.id} className="font-semibold" style={{ color: r.color }}>
+                    {n > 0 && <span className="text-slate-400">→</span>}
+                    {r.ja}
+                  </span>
+                ))}
+                {l.destination && <span>{l.destination}行</span>}
+                {connections && (
+                  <button
+                    type="button"
+                    aria-expanded={open}
+                    aria-label={open ? '列車の一覧を閉じる' : 'この区間の列車を変える'}
+                    className="ml-auto rounded px-1.5 py-0.5 font-semibold text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+                    onClick={() => setOpenLeg(open ? null : legIndex)}
+                  >
+                    {open ? '閉じる' : '変更'}
+                  </button>
+                )}
+              </div>
+              {open && connections && (
+                <LegTrainPicker
+                  connections={connections}
+                  journey={journey}
+                  legIndex={legIndex}
+                  toStations={toStations}
+                  arrive={arrive}
+                  deadline={deadline}
+                  onPick={(j) => {
+                    onCustomize(j);
+                    setOpenLeg(null);
+                  }}
+                />
+              )}
             </li>
           );
         })}
@@ -306,10 +415,26 @@ export function SimulationPanel(props: Props) {
             {state.status === 'ready' && r.from && r.to && (
               <div className="mt-2 border-t border-slate-100 pt-2">
                 <JourneySummary
-                  journey={state.candidates[i]?.[props.choice[i] ?? 0]?.journey ?? null}
+                  journey={props.journeys[i] ?? null}
                   start={arrive ? null : (state.starts[i] ?? null)}
                   deadline={deadline(i)}
+                  connections={state.connections}
+                  toStations={r.to.stations}
+                  arrive={arrive}
+                  onCustomize={(j) => props.onCustomize(i, j)}
                 />
+                {props.customized[i] && (
+                  <p className="mt-1.5 flex items-center gap-2 rounded-md bg-amber-50 px-2 py-1 text-xs text-amber-900">
+                    区間ごとに列車を選び直しています
+                    <button
+                      type="button"
+                      className="ml-auto font-semibold underline underline-offset-2"
+                      onClick={() => props.onResetCustom(i)}
+                    >
+                      元に戻す
+                    </button>
+                  </p>
+                )}
                 <CandidateList
                   candidates={state.candidates[i] ?? []}
                   selected={props.choice[i] ?? 0}
