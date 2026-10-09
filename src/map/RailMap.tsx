@@ -11,7 +11,7 @@ import type { Route } from '../domain/route';
 import type { Place } from '../domain/types';
 import { buildLayers } from './layers';
 import { placeLabels, type LabelCandidate } from './labels';
-import { BACKGROUND, LINE_ELEVATION } from './style';
+import { BACKGROUND, depthExaggeration } from './style';
 
 const INITIAL_VIEW: MapViewState = {
   longitude: 139.7,
@@ -87,9 +87,12 @@ export function RailMap({ route, endpoints, stationColors = null, placeTimes = n
     }));
   }, [route, width, height]);
 
+  // 深さの強調倍率はズーム 0.25 刻みで変える（毎フレーム作り直さないように）
+  const zoomStep = Math.round(viewState.zoom * 4) / 4;
+  const exaggeration = useMemo(() => depthExaggeration(zoomStep), [zoomStep]);
   const layers = useMemo(
-    () => buildLayers({ route, endpoints, stationColors, onPick }),
-    [route, endpoints, stationColors, onPick],
+    () => buildLayers({ route, endpoints, stationColors, onPick, exaggeration }),
+    [route, endpoints, stationColors, onPick, exaggeration],
   );
   const endpointIds = useMemo(() => new Set(endpoints.map((p) => p.id)), [endpoints]);
 
@@ -103,7 +106,8 @@ export function RailMap({ route, endpoints, stationColors = null, placeTimes = n
     const minLines = viewState.zoom < 10.3 ? 3 : viewState.zoom < 11.3 ? 2 : 1;
     const candidates: LabelCandidate[] = [];
     for (const p of network.places) {
-      const [x, y] = viewport.project([p.coord[0], p.coord[1], LINE_ELEVATION]);
+      // ラベルは地面の高さに置く（地下の駅とは立坑でつながる）
+      const [x, y] = viewport.project([p.coord[0], p.coord[1], 0]);
       let priority = p.lines;
       if (routePlaces.has(p.id)) priority += 100;
       const pinned = endpointIds.has(p.id);

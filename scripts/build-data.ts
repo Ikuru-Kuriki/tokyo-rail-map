@@ -6,6 +6,7 @@
  */
 import { writeFileSync } from 'node:fs';
 import type { Network, Place, Railway, Station } from '../src/domain/types.ts';
+import { stationDepth } from '../src/domain/depth.ts';
 
 const BASE = 'https://raw.githubusercontent.com/nagix/mini-tokyo-3d/master/data/';
 
@@ -34,8 +35,8 @@ const EXCLUDED = new Set([
 const BOUNDS = { west: 139.1, east: 140.25, south: 35.25, north: 36.05 };
 
 interface SrcTitle { ja: string; en: string }
-interface SrcRailway { id: string; title: SrcTitle; stations: string[]; color: string }
-interface SrcStation { id: string; railway?: string; coord?: [number, number]; title: SrcTitle }
+interface SrcRailway { id: string; title: SrcTitle; stations: string[]; color: string; altitude?: number }
+interface SrcStation { id: string; railway?: string; coord?: [number, number]; title: SrcTitle; altitude?: number }
 type SrcGroups = string[][][];
 
 async function get<T>(name: string): Promise<T> {
@@ -88,6 +89,8 @@ for (const r of srcRailways) {
       ja: s.title.ja,
       en: s.title.en,
       coord: [round(s.coord![0]), round(s.coord![1])],
+      // 元データの altitude は「地下なら -1」だけなので、深さは目安の表から付ける
+      depth: stationDepth(r.id, s.title.ja, s.altitude === -1 || r.altitude === -1),
     });
   }
 }

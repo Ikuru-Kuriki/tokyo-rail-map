@@ -17,6 +17,8 @@ export interface Station {
   ja: string;
   en: string;
   coord: LonLat;
+  /** 地下の深さ（m）の目安。地上・高架は 0 */
+  depth: number;
 }
 
 /** 同じ名前の駅の集まり。検索や表示の単位 */
