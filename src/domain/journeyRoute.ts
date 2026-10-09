@@ -27,6 +27,8 @@ export function stationsBetween(order: string[], a: string, b: string): string[]
 export function journeyToRoute(journey: LastTrainJourney, network: Network): Route {
   const railwayOf = new Map(network.stations.map((s) => [s.id, s.railway]));
   const orderOf = new Map(network.railways.map((r) => [r.id, r.stations]));
+  /** 駅 → 同じ駅（place）にある駅の一覧 */
+  const placeStationsOf = new Map(network.places.flatMap((p) => p.stations.map((id) => [id, p.stations] as const)));
   const legs: Leg[] = [];
   for (const leg of journey.legs) {
     if (leg.kind !== 'ride') continue;
@@ -38,8 +40,17 @@ export function journeyToRoute(journey: LastTrainJourney, network: Network): Rou
         const prev = current.stations[current.stations.length - 1]!;
         current.stations.push(...stationsBetween(orderOf.get(railway)!, prev, id).slice(1));
       } else {
-        // 直通運転で路線が変わるところでは区間を分ける
-        current = { railway, stations: [id] };
+        // 直通運転で路線が変わるところでは区間を分ける。停車駅の並びには新しい路線側の乗り入れ駅
+        // （例: 京急蒲田で京急空港線→京急本線）が入っていないので、直前の駅と同じ駅にある新しい路線の駅から始める。
+        // そうしないと乗り入れ駅から次の駅までの 1 区間が描かれない
+        const prev = i > 0 ? leg.stops[i - 1] : undefined;
+        const junction = prev
+          ? placeStationsOf.get(prev)?.find((s) => s !== prev && railwayOf.get(s) === railway)
+          : undefined;
+        current = {
+          railway,
+          stations: junction ? stationsBetween(orderOf.get(railway)!, junction, id) : [id],
+        };
         legs.push(current);
       }
     }
