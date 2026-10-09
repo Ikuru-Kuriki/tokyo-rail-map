@@ -15,7 +15,10 @@ export const SIDE_PITCH = 75;
  * 路線全体を横から見るカメラ。駅が最も広がっている向きが画面の左右になるように回し、
  * その長さが画面の幅（usableWidth）に収まるズームにする。複数の路線の駅をまとめて渡してもよい。
  */
-export function sideViewFor(coords: LonLat[], usableWidth: number): SideView {
+/**
+ * shiftPx: 路線を画面の右へずらすピクセル数（左にある検索パネルを避ける）
+ */
+export function sideViewFor(coords: LonLat[], usableWidth: number, shiftPx = 0): SideView {
   const lat0 = coords.reduce((a, c) => a + c[1], 0) / coords.length;
   const lon0 = coords.reduce((a, c) => a + c[0], 0) / coords.length;
   const kx = 111320 * Math.cos((lat0 * Math.PI) / 180);
@@ -53,10 +56,13 @@ export function sideViewFor(coords: LonLat[], usableWidth: number): SideView {
   // 傾けると奥が縮み手前が広がるので、幅には余裕を持たせる
   const metersPerPixel = extent / (Math.max(usableWidth, 200) * 0.72);
   const zoom = Math.log2((40075016.686 * Math.cos((lat0 * Math.PI) / 180)) / (512 * metersPerPixel));
+  const z = Math.min(13.5, Math.max(7.5, zoom));
+  // 画面の右向き = (dx, dy)。路線を右へずらすには、カメラの中心を左へずらす
+  const shiftM = shiftPx * ((40075016.686 * Math.cos((lat0 * Math.PI) / 180)) / (512 * 2 ** z));
   return {
-    longitude: lon0,
-    latitude: lat0,
-    zoom: Math.min(13.5, Math.max(7.5, zoom)),
+    longitude: lon0 - (dx * shiftM) / kx,
+    latitude: lat0 - (dy * shiftM) / ky,
+    zoom: z,
     bearing,
     pitch: SIDE_PITCH,
   };

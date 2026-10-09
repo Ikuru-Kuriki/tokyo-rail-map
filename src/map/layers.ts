@@ -4,7 +4,7 @@ import { network, placeByStation, stationById } from '../data';
 import type { Route } from '../domain/route';
 import type { Place, Railway, Station } from '../domain/types';
 import { gridFrame, gridLines } from './grid';
-import { BACKGROUND, DOT_LIFT, elevationOf, hexToRgb } from './style';
+import { BACKGROUND, DOT_LIFT_PX, elevationOf, hexToRgb, type DepthScale } from './style';
 
 type Position3 = [number, number, number];
 
@@ -41,8 +41,8 @@ export interface LayerState {
   focusRailways: string[];
   onPick: (place: Place) => void;
   onPickRailway?: (railwayId: string) => void;
-  /** 深さの強調倍率（ズームで変わる。style.ts の depthExaggeration） */
-  exaggeration: number;
+  /** 深さの強調倍率など（ズームで変わる。style.ts の depthScale） */
+  scale: DepthScale;
 }
 
 /*
@@ -59,14 +59,14 @@ export function buildLayers({
   focusRailways,
   onPick,
   onPickRailway,
-  exaggeration,
+  scale,
 }: LayerState): Layer[] {
-  const z = (s: Station) => elevationOf(s.depth, exaggeration);
+  const z = (s: Station) => elevationOf(s.depth, scale);
   const position = (id: string): Position3 => {
     const s = stationById.get(id)!;
     return [s.coord[0], s.coord[1], z(s)];
   };
-  const dotPosition = (s: Station): Position3 => [s.coord[0], s.coord[1], z(s) + DOT_LIFT];
+  const dotPosition = (s: Station): Position3 => [s.coord[0], s.coord[1], z(s) + DOT_LIFT_PX * scale.metersPerPixel];
   const railwayPaths: PathDatum[] = network.railways.map((r: Railway) => ({
     id: r.id,
     path: r.stations.map(position),
@@ -152,7 +152,7 @@ export function buildLayers({
       getTargetPosition: (s) => [s.coord[0], s.coord[1], 0],
       getColor: [120, 112, 100, highlighting ? 60 : 130],
       getWidth: 1,
-      updateTriggers: { getColor: [highlighting], getSourcePosition: exaggeration, getTargetPosition: exaggeration },
+      updateTriggers: { getColor: [highlighting], getSourcePosition: scale, getTargetPosition: scale },
     }),
     new ScatterplotLayer<Station>({
       id: 'stations',
@@ -168,7 +168,7 @@ export function buildLayers({
       getLineWidth: 1.2,
       lineWidthUnits: 'pixels',
       updateTriggers: {
-        getPosition: exaggeration,
+        getPosition: scale,
         getRadius: triggers,
         getFillColor: triggers,
         getLineColor: triggers,
@@ -227,7 +227,7 @@ export function buildLayers({
       lineWidthUnits: 'pixels',
       parameters: { depthCompare: 'always' },
       updateTriggers: {
-        getPosition: exaggeration,
+        getPosition: scale,
         getRadius: triggers,
         getFillColor: triggers,
         getLineColor: triggers,
