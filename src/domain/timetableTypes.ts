@@ -20,3 +20,27 @@ export interface Timetable {
 }
 
 export type DayType = 'weekday' | 'holiday';
+
+/**
+ * シミュレーション用の 1 日分の時刻表。1 時間ごとのファイル（DayChunk）と、共通の索引（DayIndex）に分ける。
+ * 時刻は「営業日の分」。trip は列車の番号で、直通運転でつながる列車は同じ番号になる。
+ */
+export interface DayIndex {
+  /** 駅 ID の一覧（DayChunk の from / to はこの添字） */
+  stations: string[];
+  /** 列車の行き先（駅名）の一覧 */
+  destinations: string[];
+  /** trip ごとの行き先（destinations の添字） */
+  tripDest: number[];
+  /** ファイルがある時（営業日の時。4〜26） */
+  hours: number[];
+}
+
+/** ある 1 時間に発車する区間（dep の昇順） */
+export interface DayChunk {
+  from: number[];
+  to: number[];
+  dep: number[];
+  arr: number[];
+  trip: number[];
+}

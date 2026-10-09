@@ -5,10 +5,10 @@ import { network, placeById, placeByStation, railwayById, railwaySymbol, station
 import { StationCode } from '../components/StationCode';
 import type { Route } from '../domain/route';
 import type { Place } from '../domain/types';
-import { buildLayers } from './layers';
+import { buildLayers, type TrainMarker } from './layers';
 import { placeLabels, type LabelCandidate } from './labels';
 import { sideViewFor } from './camera';
-import { BACKGROUND, depthScale } from './style';
+import { BACKGROUND, depthScale, elevationOf } from './style';
 
 const INITIAL_VIEW: MapViewState = {
   longitude: 139.7,
@@ -23,6 +23,7 @@ const INITIAL_VIEW: MapViewState = {
 
 const VIEW = new MapView({ repeat: false });
 const NO_RAILWAYS: string[] = [];
+const NO_TRAINS: TrainMarker[] = [];
 
 interface Props {
   route: Route | null;
@@ -36,6 +37,8 @@ interface Props {
   focusRailways?: string[];
   onPick: (place: Place) => void;
   onPickRailway?: (railwayId: string) => void;
+  /** シミュレーションの電車 */
+  trains?: TrainMarker[];
 }
 
 function useSize(ref: React.RefObject<HTMLDivElement | null>) {
@@ -60,6 +63,7 @@ export function RailMap({
   focusRailways = NO_RAILWAYS,
   onPick,
   onPickRailway,
+  trains = NO_TRAINS,
 }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const { width, height } = useSize(ref);
@@ -116,6 +120,15 @@ export function RailMap({
     () => buildLayers({ route, endpoints, stationColors, focusRailways, onPick, onPickRailway, scale }),
     [route, endpoints, stationColors, focusRailways, onPick, onPickRailway, scale],
   );
+  // シミュレーションの電車は駅名ラベルより手前に出すため、HTML で重ねる（位置は線路の高さで投影）
+  const trainMarkers = useMemo(() => {
+    if (!width || !height || trains.length === 0) return [];
+    const viewport = new WebMercatorViewport({ ...viewState, width, height });
+    return trains.map((t) => {
+      const [x, y] = viewport.project([t.coord[0], t.coord[1], elevationOf(t.depth, scale)]);
+      return { ...t, x: x!, y: y! };
+    });
+  }, [trains, viewState, width, height, scale]);
   const endpointIds = useMemo(() => new Set(endpoints.map((p) => p.id)), [endpoints]);
 
   const labels = useMemo(() => {
@@ -235,6 +248,17 @@ export function RailMap({
               {b.sym}
             </span>
           </div>
+        ))}
+        {trainMarkers.map((t) => (
+          <img
+            key={t.id}
+            src={t.icon}
+            alt=""
+            width={44}
+            height={44}
+            className="absolute drop-shadow-md"
+            style={{ left: t.x - 22, top: t.y - 24 }}
+          />
         ))}
       </div>
     </div>

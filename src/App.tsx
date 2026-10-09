@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { graph, network } from './data';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { graph, network, railwayById, stationById } from './data';
+import { useSimulation } from './data/useSimulation';
 import { todayDayType, useTimetable } from './data/timetable';
 import { rememberStation } from './data/history';
 import { journeyToRoute } from './domain/journeyRoute';
@@ -15,10 +16,44 @@ import { RouteResult } from './components/RouteResult';
 import { LastTrainSearch, type LastSlot } from './components/LastTrainSearch';
 import { LastTrainResult, Legend } from './components/LastTrainResult';
 import { LineSelect } from './components/LineSelect';
+import { MAX_SIM_ROUTES, SimulationPanel, type SimSlot } from './components/SimulationPanel';
+import { PlaybackBar } from './components/PlaybackBar';
+import { nowClock } from './domain/clock';
+import { stationsBetween } from './domain/journeyRoute';
+import { positionAt, toStopsJourney, type Geometry } from './domain/simulate';
+import type { SimRouteInput } from './domain/simRoutes';
+import type { Route } from './domain/route';
+import type { TrainMarker } from './map/layers';
+import { SIM_COLORS, trainIconUrl } from './map/trainIcon';
 
-type Mode = 'route' | 'last';
+type Mode = 'route' | 'last' | 'sim';
 
 const footpaths = buildFootpaths(network);
+
+/** シミュレーションの電車の位置を決めるための、駅と線路の情報 */
+const geometry: Geometry = {
+  coord: (id) => stationById.get(id)!.coord,
+  depth: (id) => stationById.get(id)!.depth,
+  name: (id) => stationById.get(id)!.ja,
+  railwayName: (id) => railwayById.get(stationById.get(id)!.railway)!.ja,
+  path: (a, b) => {
+    const ra = stationById.get(a)!.railway;
+    if (ra !== stationById.get(b)!.railway) return [a, b];
+    return stationsBetween(railwayById.get(ra)!.stations, a, b);
+  },
+};
+
+const TRAIN_ICONS = SIM_COLORS.map((c, i) => trainIconUrl(c, i + 1));
+
+let nextSimRouteId = 1;
+const newSimRoute = (): SimRouteInput => ({
+  id: nextSimRouteId++,
+  from: null,
+  to: null,
+  mode: 'offset',
+  offset: 15,
+  time: '',
+});
 
 export default function App() {
   const [mode, setMode] = useState<Mode>('route');
@@ -93,10 +128,78 @@ export default function App() {
     return m;
   }, [placeLatest]);
 
+  // シミュレーション
+  const [simRoutes, setSimRoutes] = useState<SimRouteInput[]>(() => [
+    { ...newSimRoute(), mode: 'same' },
+    newSimRoute(),
+  ]);
+  const [simBaseTime, setSimBaseTime] = useState(() => nowClock());
+  const [simSlot, setSimSlot] = useState<SimSlot>({ route: 0, field: 'from' });
+  const sim = useSimulation(day, simRoutes, simBaseTime);
+  const [simTime, setSimTime] = useState(0);
+  const [playing, setPlaying] = useState(false);
+  const [speed, setSpeed] = useState(60);
+  const simJourneys = useMemo(() => (sim.status === 'ready' ? sim.journeys : []), [sim]);
+  /** 再生する時刻の範囲（最初の出発〜最後の到着の少し後） */
+  const simRange = useMemo((): [number, number] | null => {
+    const js = simJourneys.filter((j) => j !== null);
+    if (js.length === 0) return null;
+    return [Math.min(...js.map((j) => j.start)), Math.max(...js.map((j) => j.arr)) + 2];
+  }, [simJourneys]);
+  // 行程が変わったら最初に戻して止める
+  useEffect(() => {
+    if (simRange) setSimTime(simRange[0]);
+    setPlaying(false);
+  }, [simRange]);
+  // 再生: 実際の 1 秒で speed 秒ぶん進める
+  const lastFrame = useRef<number | null>(null);
+  useEffect(() => {
+    if (!playing || !simRange || mode !== 'sim') return;
+    let raf = 0;
+    const tick = (now: number) => {
+      const prev = lastFrame.current ?? now;
+      lastFrame.current = now;
+      setSimTime((t) => {
+        const next = t + ((now - prev) / 1000) * (speed / 60);
+        if (next >= simRange[1]) {
+          setPlaying(false);
+          return simRange[1];
+        }
+        return next;
+      });
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => {
+      cancelAnimationFrame(raf);
+      lastFrame.current = null;
+    };
+  }, [playing, simRange, speed, mode]);
+  const simPositions = useMemo(
+    () => simJourneys.map((j) => (j ? positionAt(j, simTime, geometry) : null)),
+    [simJourneys, simTime],
+  );
+  const trains = useMemo<TrainMarker[]>(
+    () =>
+      simPositions.flatMap((p, i) =>
+        p ? [{ id: `sim-${i}`, coord: p.coord, depth: p.depth, icon: TRAIN_ICONS[i]! }] : [],
+      ),
+    [simPositions],
+  );
+  /** 全経路の通り道をまとめて強調する */
+  const simRoute = useMemo((): Route | null => {
+    const routes = simJourneys.filter((j) => j !== null).map((j) => journeyToRoute(toStopsJourney(j), network));
+    if (routes.length === 0) return null;
+    return { legs: routes.flatMap((r) => r.legs), transfers: 0, minutes: 0 };
+  }, [simJourneys]);
+  const updateSimRoute = useCallback((index: number, patch: Partial<SimRouteInput>) => {
+    setSimRoutes((rs) => rs.map((r, i) => (i === index ? { ...r, ...patch } : r)));
+  }, []);
+
   // 選んだ駅を履歴に残す（入力欄で何も打っていないときに出る）
   useEffect(() => {
-    for (const p of [from, to, home, origin]) if (p) rememberStation(p);
-  }, [from, to, home, origin]);
+    for (const p of [from, to, home, origin, ...simRoutes.flatMap((r) => [r.from, r.to])]) if (p) rememberStation(p);
+  }, [from, to, home, origin, simRoutes]);
 
   const onPickRailway = useCallback((id: string) => {
     // 地図の線をクリック: 強調中なら外し、そうでなければ追加する
@@ -106,7 +209,11 @@ export default function App() {
   // 地図上の駅クリック
   const onPick = useCallback(
     (p: Place) => {
-      if (mode === 'route') {
+      if (mode === 'sim') {
+        // 選んでいる欄に入れる。出発を入れたら同じ経路の到着へ進む
+        updateSimRoute(simSlot.route, { [simSlot.field]: p });
+        if (simSlot.field === 'from') setSimSlot({ route: simSlot.route, field: 'to' });
+      } else if (mode === 'route') {
         // 出発が未入力か、出発の欄を選んでいるときは出発に入れる。
         // それ以外（出発・到着とも入れた後も含む）は到着を入れ替える
         if (slot === 'from' || !from) {
@@ -124,29 +231,36 @@ export default function App() {
         setOrigin(p);
       }
     },
-    [mode, slot, from, lastSlot, home],
+    [mode, slot, from, lastSlot, home, simSlot, updateSimRoute],
   );
 
   const isLast = mode === 'last';
+  const isSim = mode === 'sim';
   const endpoints = useMemo(
-    () => (isLast ? [home, origin] : [from, to]).filter((p): p is Place => p !== null),
-    [isLast, home, origin, from, to],
+    () =>
+      (isSim ? simRoutes.flatMap((r) => [r.from, r.to]) : isLast ? [home, origin] : [from, to]).filter(
+        (p): p is Place => p !== null,
+      ),
+    [isSim, simRoutes, isLast, home, origin, from, to],
   );
 
   return (
     <main className="fixed inset-0">
       <RailMap
-        route={isLast ? lastRoute : route}
+        route={isSim ? simRoute : isLast ? lastRoute : route}
         endpoints={endpoints}
         stationColors={isLast ? stationColors : null}
         placeTimes={isLast ? placeTimes : null}
         focusRailways={focusRailways}
         onPick={onPick}
         onPickRailway={onPickRailway}
+        trains={isSim ? trains : undefined}
       />
       {/* スマホでは検索を上、結果を下に。PC では左上に縦に並べる */}
       <div className="pointer-events-none absolute inset-0 flex flex-col justify-between gap-3 p-3 md:justify-start md:p-4">
-        <section className="panel pointer-events-auto w-full rounded-2xl bg-white/95 p-3 backdrop-blur md:w-80 md:p-4">
+        <section
+          className={`panel pointer-events-auto w-full rounded-2xl bg-white/95 p-3 backdrop-blur md:w-80 md:p-4 ${isSim ? 'max-h-[45vh] overflow-y-auto md:max-h-[calc(100vh-2rem)]' : ''}`}
+        >
           <div className={`flex items-center gap-2 ${panelOpen ? 'mb-2 md:mb-3' : ''}`}>
             <h1 className="flex min-w-0 flex-1 items-baseline gap-2">
               <span className="text-lg font-bold whitespace-nowrap">首都圏 路線図</span>
@@ -165,11 +279,12 @@ export default function App() {
             </button>
           </div>
           <div id="search-panel-body" hidden={!panelOpen}>
-            <div role="tablist" className="mb-3 grid grid-cols-2 rounded-lg bg-slate-100 p-0.5 text-sm font-semibold">
+            <div role="tablist" className="mb-3 flex rounded-lg bg-slate-100 p-0.5 text-sm font-semibold">
               {(
                 [
                   ['route', '経路'],
                   ['last', '終電'],
+                  ['sim', 'シミュレーション'],
                 ] as const
               ).map(([value, label]) => (
                 <button
@@ -177,14 +292,38 @@ export default function App() {
                   type="button"
                   role="tab"
                   aria-selected={mode === value}
-                  className={`rounded-md py-1.5 ${mode === value ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}
+                  className={`flex-auto rounded-md px-2 py-1.5 whitespace-nowrap ${mode === value ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}
                   onClick={() => setMode(value)}
                 >
                   {label}
                 </button>
               ))}
             </div>
-            {isLast ? (
+            {isSim ? (
+              <SimulationPanel
+                routes={simRoutes}
+                baseTime={simBaseTime}
+                day={day}
+                slot={simSlot}
+                state={sim}
+                onSlot={setSimSlot}
+                onChange={(i, patch) => {
+                  updateSimRoute(i, patch);
+                  if (patch.from) setSimSlot({ route: i, field: 'to' });
+                }}
+                onAdd={() => {
+                  if (simRoutes.length >= MAX_SIM_ROUTES) return;
+                  setSimRoutes((rs) => [...rs, newSimRoute()]);
+                  setSimSlot({ route: simRoutes.length, field: 'from' });
+                }}
+                onRemove={(i) => {
+                  setSimRoutes((rs) => rs.filter((_, j) => j !== i));
+                  setSimSlot({ route: 0, field: 'from' });
+                }}
+                onBaseTime={setSimBaseTime}
+                onDay={setDay}
+              />
+            ) : isLast ? (
               <LastTrainSearch
                 home={home}
                 origin={origin}
@@ -238,7 +377,7 @@ export default function App() {
             />
           </div>
         </section>
-        {panelOpen && !isLast && from && to && (
+        {mode === 'route' && panelOpen && from && to && (
           <section className="panel pointer-events-auto max-h-[40vh] w-full overflow-auto rounded-2xl bg-white/95 p-4 backdrop-blur md:max-h-none md:w-80">
             <RouteResult route={route} from={from} to={to} />
           </section>
@@ -252,6 +391,21 @@ export default function App() {
           </section>
         )}
       </div>
+      {isSim && simRange && (
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center p-3 md:bottom-4 md:left-[22rem] md:justify-start md:p-0">
+          <PlaybackBar
+            start={simRange[0]}
+            end={simRange[1]}
+            time={simTime}
+            playing={playing}
+            speed={speed}
+            rows={simPositions.flatMap((p, i) => (p ? [{ index: i, status: p.status }] : []))}
+            onTime={setSimTime}
+            onPlay={setPlaying}
+            onSpeed={setSpeed}
+          />
+        </div>
+      )}
       <p className="pointer-events-none absolute right-2 bottom-1 text-[10px] text-slate-400">
         <span className="hidden md:inline">地下の路線は深さを強調して描いています（深さは目安）・</span>
         データ: Mini Tokyo 3D / 公共交通オープンデータセンター

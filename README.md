@@ -9,6 +9,8 @@
   強調中の路線の端には路線記号（JK など）を出す
 - **最近使った駅**: 入力欄を空のままクリックすると、これまでに選んだ駅（最大 8 件）が出る。ブラウザに保存する
 - 検索パネルは「閉じる / 開く」で畳める
+- **シミュレーション**: 経路を 3 つまで設定し、出発時刻（共通の時刻、または経路ごとに「経路 1 の◯分後」「時刻を指定」）から
+  時刻表どおりに乗る電車を求めて、地図上で電車のアイコンを動かす。再生・一時停止、速さ（×10〜×120）、時刻のスライダー
 - **終電**: 帰る駅を選ぶと、各駅から「何時までに出れば帰れるか」を地図に色と時刻で表示。
   今いる駅を選ぶ（または地図でクリックする）と、その駅からの終電ルートを発着時刻つきで表示。平日 / 土休日を切り替えられる
 
@@ -28,7 +30,7 @@ npm test           # テスト（Vitest）
 npm run typecheck  # 型チェック
 npm run build      # dist/ にビルド
 NODE_USE_ENV_PROXY=1 npm run data       # 路線データを取り直して src/data/network.json を作り直す
-NODE_USE_ENV_PROXY=1 npm run timetable  # 時刻表から public/timetable/{weekday,holiday}.json を作り直す（data の後に）
+NODE_USE_ENV_PROXY=1 npm run timetable  # 時刻表から public/timetable/ 以下を作り直す（data の後に）
 ```
 
 ## データの出典
