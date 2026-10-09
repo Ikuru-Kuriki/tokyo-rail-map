@@ -19,6 +19,8 @@ export interface Station {
   coord: LonLat;
   /** 地下の深さ（m）の目安。地上・高架は 0 */
   depth: number;
+  /** 駅ナンバリング（例: "JK26"）。無い駅もある */
+  code?: string;
 }
 
 /** 同じ名前の駅の集まり。検索や表示の単位 */

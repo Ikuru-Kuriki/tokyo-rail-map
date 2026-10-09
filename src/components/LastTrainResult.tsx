@@ -2,6 +2,7 @@ import { railwayById, stationById } from '../data';
 import { formatMinutes, type LastTrainJourney } from '../domain/lastTrain';
 import { BUCKETS, UNREACHABLE_COLOR } from '../domain/lastTrainColors';
 import type { Place } from '../domain/types';
+import { StationName } from './StationName';
 
 export function Legend() {
   return (
@@ -79,7 +80,7 @@ export function LastTrainResult({ home, origin, journey }: Props) {
               />
               <span className="absolute top-1 left-0.5 h-4 w-4 rounded-full border-2 border-slate-900 bg-white" />
               <div className="flex justify-between pb-1 font-semibold">
-                <span>{nameOf(leg.stops[0]!)}</span>
+                <StationName id={leg.stops[0]!} />
                 <span className="tabular-nums">{formatMinutes(leg.dep)} 発</span>
               </div>
               <div className="pb-2 text-sm text-slate-500">
@@ -92,7 +93,7 @@ export function LastTrainResult({ home, origin, journey }: Props) {
                 {last && (
                   <span className="absolute top-1 -left-[22px] h-4 w-4 rounded-full border-2 border-slate-900 bg-slate-900" />
                 )}
-                <span>{nameOf(leg.stops[leg.stops.length - 1]!)}</span>
+                <StationName id={leg.stops[leg.stops.length - 1]!} />
                 <span className="tabular-nums">{formatMinutes(leg.arr)} 着</span>
               </div>
             </li>

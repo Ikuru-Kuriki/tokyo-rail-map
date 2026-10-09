@@ -12,29 +12,32 @@ export interface SideView {
 export const SIDE_PITCH = 75;
 
 /**
- * 路線全体を横から見るカメラ。路線の始点→終点の向きが画面の左右になるように回し、
- * その長さが画面の幅（usableWidth）に収まるズームにする。
+ * 路線全体を横から見るカメラ。駅が最も広がっている向きが画面の左右になるように回し、
+ * その長さが画面の幅（usableWidth）に収まるズームにする。複数の路線の駅をまとめて渡してもよい。
  */
 export function sideViewFor(coords: LonLat[], usableWidth: number): SideView {
   const lat0 = coords.reduce((a, c) => a + c[1], 0) / coords.length;
   const lon0 = coords.reduce((a, c) => a + c[0], 0) / coords.length;
   const kx = 111320 * Math.cos((lat0 * Math.PI) / 180);
   const ky = 110540;
-  const first = coords[0]!;
-  const last = coords[coords.length - 1]!;
-  let dx = (last[0] - first[0]) * kx;
-  let dy = (last[1] - first[1]) * ky;
-  // 環状線などで始点と終点が近いときは、いちばん遠い駅の向きを使う
-  if (Math.hypot(dx, dy) < 1000) {
-    let far = first;
-    for (const c of coords)
-      if (
-        Math.hypot((c[0] - first[0]) * kx, (c[1] - first[1]) * ky) >
-        Math.hypot((far[0] - first[0]) * kx, (far[1] - first[1]) * ky)
-      )
-        far = c;
-    dx = (far[0] - first[0]) * kx;
-    dy = (far[1] - first[1]) * ky;
+  // 駅の広がりがいちばん大きい向き（主成分）を左右にする。複数の路線や環状線でも決まる
+  let sxx = 0;
+  let syy = 0;
+  let sxy = 0;
+  for (const c of coords) {
+    const x = (c[0] - lon0) * kx;
+    const y = (c[1] - lat0) * ky;
+    sxx += x * x;
+    syy += y * y;
+    sxy += x * y;
+  }
+  const angle = 0.5 * Math.atan2(2 * sxy, sxx - syy);
+  let dx = Math.cos(angle);
+  let dy = Math.sin(angle);
+  // 向きをそろえる（西→東、南北なら南→北が左→右）
+  if (dx < -1e-9 || (Math.abs(dx) <= 1e-9 && dy < 0)) {
+    dx = -dx;
+    dy = -dy;
   }
   const heading = (Math.atan2(dx, dy) * 180) / Math.PI;
   let bearing = heading - 90;

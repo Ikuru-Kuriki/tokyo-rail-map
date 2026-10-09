@@ -1,6 +1,6 @@
 import { useId } from 'react';
-import { network } from '../data';
-import type { Railway } from '../domain/types';
+import { network, railwaySymbol } from '../data';
+import { StationCode } from './StationCode';
 
 /** 会社名（路線 ID の先頭） */
 const OPERATORS: [string, string][] = [
@@ -32,43 +32,77 @@ const groups = OPERATORS.map(([prefix, name]) => ({
   railways: network.railways.filter((r) => r.id.split('.')[0] === prefix),
 })).filter((g) => g.railways.length > 0);
 
+const label = (id: string) => {
+  const r = network.railways.find((x) => x.id === id)!;
+  const sym = railwaySymbol(id);
+  return sym ? `${sym} ${r.ja}` : r.ja;
+};
+
 interface Props {
-  value: string | null;
-  onChange: (railwayId: string | null) => void;
+  value: string[];
+  onChange: (railwayIds: string[]) => void;
 }
 
+/** 強調する路線を選ぶ。選ぶたびに追加され、複数の路線を色付きで見比べられる */
 export function LineSelect({ value, onChange }: Props) {
   const id = useId();
-  const selected: Railway | undefined = network.railways.find((r) => r.id === value);
   return (
     <div className="mt-3 border-t border-slate-100 pt-3">
       <label htmlFor={id} className="mb-1 block text-xs font-semibold text-slate-500">
-        路線を強調（地図の線をクリックしても選べます）
+        路線を強調（いくつでも追加できます。地図の線をクリックしても選べます）
       </label>
+      {value.length > 0 && (
+        <ul className="mb-2 flex flex-wrap gap-1.5" aria-label="強調中の路線">
+          {value.map((rid) => {
+            const r = network.railways.find((x) => x.id === rid)!;
+            const sym = railwaySymbol(rid);
+            return (
+              <li key={rid}>
+                <button
+                  type="button"
+                  className="flex items-center gap-1.5 rounded-full border border-slate-200 bg-white py-0.5 pr-2 pl-1 text-xs font-semibold hover:bg-slate-50"
+                  onClick={() => onChange(value.filter((x) => x !== rid))}
+                  aria-label={`${r.ja}の強調を外す`}
+                >
+                  {sym ? (
+                    <StationCode code={sym} color={r.color} size="sm" />
+                  ) : (
+                    <span className="ml-1 h-3 w-3 rounded-full" style={{ background: r.color }} aria-hidden="true" />
+                  )}
+                  {r.ja}
+                  <span className="text-slate-400" aria-hidden="true">
+                    ×
+                  </span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
       <div className="flex items-center gap-2">
-        {selected && (
-          <span className="h-3 w-3 shrink-0 rounded-full" style={{ background: selected.color }} aria-hidden="true" />
-        )}
         <select
           id={id}
           className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm font-semibold"
-          value={value ?? ''}
-          onChange={(e) => onChange(e.target.value || null)}
+          value=""
+          onChange={(e) => {
+            const rid = e.target.value;
+            if (rid && !value.includes(rid)) onChange([...value, rid]);
+          }}
         >
-          <option value="">すべての路線</option>
+          <option value="">{value.length > 0 ? '路線を追加…' : '路線を選ぶ…'}</option>
           {groups.map((g) => (
             <optgroup key={g.name} label={g.name}>
               {g.railways.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.ja}
+                <option key={r.id} value={r.id} disabled={value.includes(r.id)}>
+                  {label(r.id)}
                 </option>
               ))}
             </optgroup>
           ))}
         </select>
-        {selected && (
-          <button type="button" className="btn shrink-0 !px-2 !py-1 text-xs" onClick={() => onChange(null)}>
-            解除
+        {value.length > 0 && (
+          <button type="button" className="btn shrink-0 !px-2 !py-1 text-xs" onClick={() => onChange([])}>
+            すべて解除
           </button>
         )}
       </div>

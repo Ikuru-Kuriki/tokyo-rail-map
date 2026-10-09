@@ -24,8 +24,8 @@ export default function App() {
   const [mode, setMode] = useState<Mode>('route');
   /** 検索パネルを開いているか */
   const [panelOpen, setPanelOpen] = useState(true);
-  /** 強調する路線（ほかの路線はグレーになる） */
-  const [focusRailway, setFocusRailway] = useState<string | null>(null);
+  /** 強調する路線（複数可。ほかの路線はグレーになる） */
+  const [focusRailways, setFocusRailways] = useState<string[]>([]);
 
   // 経路
   const [from, setFrom] = useState<Place | null>(null);
@@ -99,7 +99,8 @@ export default function App() {
   }, [from, to, home, origin]);
 
   const onPickRailway = useCallback((id: string) => {
-    setFocusRailway((cur) => (cur === id ? null : id));
+    // 地図の線をクリック: 強調中なら外し、そうでなければ追加する
+    setFocusRailways((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
   }, []);
 
   // 地図上の駅クリック
@@ -138,7 +139,7 @@ export default function App() {
         endpoints={endpoints}
         stationColors={isLast ? stationColors : null}
         placeTimes={isLast ? placeTimes : null}
-        focusRailway={focusRailway}
+        focusRailways={focusRailways}
         onPick={onPick}
         onPickRailway={onPickRailway}
       />
@@ -227,11 +228,11 @@ export default function App() {
               />
             )}
             <LineSelect
-              value={focusRailway}
-              onChange={(id) => {
-                setFocusRailway(id);
-                // スマホではパネルが路線を隠すので、選んだら閉じる
-                if (id && window.innerWidth < 768) setPanelOpen(false);
+              value={focusRailways}
+              onChange={(ids) => {
+                // スマホではパネルが路線を隠すので、路線を足したら閉じる
+                if (ids.length > focusRailways.length && window.innerWidth < 768) setPanelOpen(false);
+                setFocusRailways(ids);
               }}
             />
           </div>

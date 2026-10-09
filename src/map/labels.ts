@@ -4,6 +4,8 @@ export interface LabelCandidate {
   en: string;
   /** 駅名の横に添える時刻（終電マップ） */
   time?: string;
+  /** 駅名の左に出す駅ナンバリング */
+  codes?: { code: string; color: string }[];
   /** 画面上の位置（駅の点） */
   x: number;
   y: number;
@@ -26,8 +28,11 @@ export const LABEL_HEIGHT = 42;
 /** ラベルの下端と駅の点の間隔 */
 const GAP = 8;
 
-export function labelWidth(ja: string, en: string, time = ''): number {
-  return Math.max(ja.length * 17 + (time ? time.length * 9 + 6 : 0), en.length * 7.6) + 24;
+/** 駅ナンバリング 1 つ分の幅（枠と間隔を含む） */
+const CODE_WIDTH = 34;
+
+export function labelWidth(ja: string, en: string, time = '', codes = 0): number {
+  return Math.max(ja.length * 17 + (time ? time.length * 9 + 6 : 0), en.length * 7.6) + 24 + codes * CODE_WIDTH;
 }
 
 /**
@@ -44,7 +49,7 @@ export function placeLabels(
   const sorted = [...candidates].sort((a, b) => b.priority - a.priority);
   for (const c of sorted) {
     if (placed.length >= max) break;
-    const w = labelWidth(c.ja, c.en, c.time);
+    const w = labelWidth(c.ja, c.en, c.time, c.codes?.length ?? 0);
     let left = c.x - w / 2;
     let top = c.y - LABEL_HEIGHT - GAP;
     if (c.pinned) {

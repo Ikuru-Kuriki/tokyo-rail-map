@@ -43,4 +43,19 @@ describe('sideViewFor', () => {
     );
     expect(long.zoom).toBeLessThan(short.zoom);
   });
+
+  it('複数の路線の駅をまとめて渡すと、全体が広がる向きを左右にする', () => {
+    // 東西に長い 2 本の平行な路線
+    const v = sideViewFor(
+      [
+        [139.5, 35.6],
+        [139.9, 35.6],
+        [139.5, 35.62],
+        [139.9, 35.62],
+      ],
+      1000,
+    );
+    expect(v.bearing).toBeCloseTo(0, 1);
+    expect(v.latitude).toBeCloseTo(35.61, 5);
+  });
 });

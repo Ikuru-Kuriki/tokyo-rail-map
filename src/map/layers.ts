@@ -37,8 +37,8 @@ export interface LayerState {
   endpoints: Place[];
   /** 駅ごとの色（終電マップ）。指定がない駅は「帰れない」色 */
   stationColors: Map<string, [number, number, number]> | null;
-  /** 強調する路線。ほかの路線はグレースケールになる */
-  focusRailway: string | null;
+  /** 強調する路線（複数可）。ほかの路線はグレースケールになる */
+  focusRailways: string[];
   onPick: (place: Place) => void;
   onPickRailway?: (railwayId: string) => void;
   /** 深さの強調倍率（ズームで変わる。style.ts の depthExaggeration） */
@@ -56,7 +56,7 @@ export function buildLayers({
   route,
   endpoints: ends,
   stationColors,
-  focusRailway,
+  focusRailways,
   onPick,
   onPickRailway,
   exaggeration,
@@ -79,7 +79,9 @@ export function buildLayers({
   const coloring = stationColors !== null && route === null;
   const focus = network.stations.filter((s) => endpoints.has(s.id) || routeStations.has(s.id));
   /** 強調中の路線以外の駅は薄くする */
-  const dimmed = (s: Station) => focusRailway !== null && s.railway !== focusRailway;
+  const focusSet = new Set(focusRailways);
+  const focusing = focusSet.size > 0;
+  const dimmed = (s: Station) => focusing && !focusSet.has(s.railway);
 
   const routePaths: PathDatum[] = (route?.legs ?? []).map((l, i) => ({
     id: `${l.railway}#${i}`,
@@ -114,7 +116,7 @@ export function buildLayers({
     if (dimmed(s) && !routeStations.has(s.id)) return [30, 30, 30, 0];
     return [30, 30, 30, highlighting && !routeStations.has(s.id) ? 70 : 230];
   };
-  const triggers = [route, ends, stationColors, focusRailway];
+  const triggers = [route, ends, stationColors, focusRailways];
 
   return [
     new PathLayer<PathDatum>({
@@ -124,12 +126,12 @@ export function buildLayers({
       // 路線を強調中はその路線だけ色を残し、ほかはグレースケールにする。
       // 経路を表示中は全路線を薄くし、経路の区間だけを上に重ねて色を付ける
       getColor: (d) => {
-        if (d.id === focusRailway) return [...d.color, 255];
+        if (focusSet.has(d.id)) return [...d.color, 255];
         // 参考の見た目に合わせ、ほかの路線は薄く透けるグレーにする
-        if (focusRailway !== null) return [...greyOf(d.color), 80];
+        if (focusing) return [...greyOf(d.color), 80];
         return highlighting ? [...MUTED, 255] : [...d.color, 255];
       },
-      getWidth: (d) => (d.id === focusRailway ? 8 : focusRailway !== null ? 2.5 : 5),
+      getWidth: (d) => (focusSet.has(d.id) ? 8 : focusing ? 2.5 : 5),
       widthUnits: 'pixels',
       widthMinPixels: 2,
       jointRounded: true,
@@ -140,12 +142,12 @@ export function buildLayers({
         if (info.object) onPickRailway?.(info.object.id);
         return true;
       },
-      updateTriggers: { getColor: [highlighting, focusRailway], getWidth: focusRailway },
+      updateTriggers: { getColor: [highlighting, focusRailways], getWidth: focusRailways },
     }),
     new LineLayer<Station>({
       id: 'shafts',
       // 路線を強調中は、その路線の立坑だけを出す
-      data: focusRailway ? shafts.filter((s) => s.railway === focusRailway) : shafts,
+      data: focusing ? shafts.filter((s) => focusSet.has(s.railway)) : shafts,
       getSourcePosition: (s) => [s.coord[0], s.coord[1], z(s)],
       getTargetPosition: (s) => [s.coord[0], s.coord[1], 0],
       getColor: [120, 112, 100, highlighting ? 60 : 130],
