@@ -21,7 +21,7 @@ import { PlaybackBar } from './components/PlaybackBar';
 import { nowClock } from './domain/clock';
 import { stationsBetween } from './domain/journeyRoute';
 import { positionAt, toStopsJourney, type Geometry } from './domain/simulate';
-import type { SimRouteInput } from './domain/simRoutes';
+import type { SimRouteInput, TimeKind } from './domain/simRoutes';
 import type { Route } from './domain/route';
 import type { TrainMarker } from './map/layers';
 import { SIM_COLORS, trainIconUrl } from './map/trainIcon';
@@ -135,7 +135,8 @@ export default function App() {
   ]);
   const [simBaseTime, setSimBaseTime] = useState(() => nowClock());
   const [simSlot, setSimSlot] = useState<SimSlot>({ route: 0, field: 'from' });
-  const sim = useSimulation(day, simRoutes, simBaseTime);
+  const [simTimeKind, setSimTimeKind] = useState<TimeKind>('depart');
+  const sim = useSimulation(day, simRoutes, simBaseTime, simTimeKind);
   const [simTime, setSimTime] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(60);
@@ -150,7 +151,8 @@ export default function App() {
   const simRange = useMemo((): [number, number] | null => {
     const js = simJourneys.filter((j) => j !== null);
     if (js.length === 0) return null;
-    return [Math.min(...js.map((j) => j.start)), Math.max(...js.map((j) => j.arr)) + 2];
+    // 最初の電車の少し前から（到着指定では start = 実際の出発時刻）
+    return [Math.min(...js.map((j) => Math.min(j.start, j.dep - 2))), Math.max(...js.map((j) => j.arr)) + 2];
   }, [simJourneys]);
   // 行程が変わったら最初に戻して止める
   useEffect(() => {
@@ -335,6 +337,8 @@ export default function App() {
                   setSimSlot({ route: 0, field: 'from' });
                 }}
                 onBaseTime={setSimBaseTime}
+                timeKind={simTimeKind}
+                onTimeKind={setSimTimeKind}
                 onDay={setDay}
               />
             ) : isLast ? (

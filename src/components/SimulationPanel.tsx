@@ -2,8 +2,8 @@ import { useId } from 'react';
 import { railwayById, stationById } from '../data';
 import type { SimulationState } from '../data/useSimulation';
 import { formatMinutes } from '../domain/lastTrain';
-import type { JourneyCandidate, SimJourney } from '../domain/simulate';
-import type { SimRouteInput, StartMode } from '../domain/simRoutes';
+import type { SimJourney } from '../domain/simulate';
+import type { SimRouteInput, StartMode, TimeKind } from '../domain/simRoutes';
 import type { DayType } from '../domain/timetableTypes';
 import type { Place } from '../domain/types';
 import { SIM_COLORS } from '../map/trainIcon';
@@ -28,8 +28,16 @@ interface Props {
   onAdd: () => void;
   onRemove: (index: number) => void;
   onBaseTime: (time: string) => void;
+  /** 時刻を出発・到着のどちらとして使うか（全経路共通） */
+  timeKind: TimeKind;
+  onTimeKind: (kind: TimeKind) => void;
   onDay: (day: DayType) => void;
 }
+
+const TIME_KINDS: [TimeKind, string][] = [
+  ['depart', '出発'],
+  ['arrive', '到着'],
+];
 
 const DAYS: [DayType, string][] = [
   ['weekday', '平日'],
@@ -66,7 +74,7 @@ function CandidateList({
   start,
   onChoose,
 }: {
-  candidates: JourneyCandidate[];
+  candidates: { journey: SimJourney; labels: string[] }[];
   selected: number;
   start: number | null;
   onChoose: (index: number) => void;
@@ -99,7 +107,7 @@ function CandidateList({
                   {c.labels.map((label) => (
                     <span
                       key={label}
-                      className={`rounded px-1 text-[10px] font-semibold ${label === '最速' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600'}`}
+                      className={`rounded px-1 text-[10px] font-semibold ${label === '最速' || label === '間に合う最終' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600'}`}
                     >
                       {label}
                     </span>
@@ -122,15 +130,32 @@ function CandidateList({
   );
 }
 
-function JourneySummary({ journey, start }: { journey: SimJourney | null; start: number | null }) {
-  if (!journey) return <p className="text-xs text-slate-500">この時刻からの電車が見つかりませんでした。</p>;
+function JourneySummary({
+  journey,
+  start,
+  deadline,
+}: {
+  journey: SimJourney | null;
+  start: number | null;
+  /** 到着指定のときの締切 */
+  deadline: number | null;
+}) {
+  if (!journey)
+    return (
+      <p className="text-xs text-slate-500">
+        {deadline !== null
+          ? `${formatMinutes(deadline)} までに着く電車が見つかりませんでした。`
+          : 'この時刻からの電車が見つかりませんでした。'}
+      </p>
+    );
   const rides = journey.legs.filter((l) => l.kind === 'ride');
   return (
     <div className="text-xs text-slate-600">
       <p className="mb-1">
         <span className="font-bold text-slate-900 tabular-nums">{formatMinutes(journey.dep)}</span> 発 →{' '}
         <span className="font-bold text-slate-900 tabular-nums">{formatMinutes(journey.arr)}</span> 着（
-        {journey.arr - (start ?? journey.dep)} 分・乗換 {Math.max(0, rides.length - 1)} 回）
+        {journey.arr - (start ?? journey.dep)} 分・乗換 {Math.max(0, rides.length - 1)} 回
+        {deadline !== null && `・${formatMinutes(deadline)} までに到着`}）
       </p>
       <ol className="space-y-0.5">
         {rides.map((l, i) => {
@@ -156,12 +181,29 @@ function JourneySummary({ journey, start }: { journey: SimJourney | null; start:
 export function SimulationPanel(props: Props) {
   const { routes, baseTime, day, slot, state } = props;
   const timeId = useId();
+  const arrive = props.timeKind === 'arrive';
+  /** 到着指定のときの経路ごとの締切 */
+  const deadline = (i: number) => (arrive && state.status === 'ready' ? (state.starts[i] ?? null) : null);
   return (
     <>
       <div className="flex flex-wrap items-end gap-2">
         <div>
-          <label htmlFor={timeId} className="mb-1 block text-xs font-semibold text-slate-500">
-            出発時刻
+          <div role="radiogroup" aria-label="時刻の指定" className="mb-1 flex gap-1 text-xs font-semibold">
+            {TIME_KINDS.map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                role="radio"
+                aria-checked={props.timeKind === value}
+                className={`rounded px-1.5 py-0.5 ${props.timeKind === value ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
+                onClick={() => props.onTimeKind(value)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <label htmlFor={timeId} className="sr-only">
+            {arrive ? '到着時刻' : '出発時刻'}
           </label>
           <input
             id={timeId}
@@ -227,14 +269,14 @@ export function SimulationPanel(props: Props) {
             {i > 0 && (
               <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs">
                 <select
-                  aria-label={`経路 ${i + 1} の出発時刻`}
+                  aria-label={`経路 ${i + 1} の${arrive ? '到着' : '出発'}時刻`}
                   className="rounded-md border border-slate-200 bg-white px-1.5 py-1 font-semibold"
                   value={r.mode}
                   onChange={(e) => props.onChange(i, { mode: e.target.value as StartMode })}
                 >
-                  <option value="same">経路 1 と同じ時刻</option>
-                  <option value="offset">経路 1 の◯分後</option>
-                  <option value="time">時刻を指定</option>
+                  <option value="same">経路 1 と同じ{arrive ? '到着' : '出発'}時刻</option>
+                  <option value="offset">経路 1 の◯分後に{arrive ? '到着' : '出発'}</option>
+                  <option value="time">{arrive ? '到着' : '出発'}時刻を指定</option>
                 </select>
                 {r.mode === 'offset' && (
                   <label className="flex items-center gap-1">
@@ -247,13 +289,13 @@ export function SimulationPanel(props: Props) {
                       value={r.offset}
                       onChange={(e) => props.onChange(i, { offset: Number(e.target.value) || 0 })}
                     />
-                    分後
+                    分後に{arrive ? '到着' : '出発'}
                   </label>
                 )}
                 {r.mode === 'time' && (
                   <input
                     type="time"
-                    aria-label={`経路 ${i + 1} の出発時刻を指定`}
+                    aria-label={`経路 ${i + 1} の${arrive ? '到着' : '出発'}時刻を指定`}
                     className="rounded-md border border-slate-200 px-1.5 py-1 tabular-nums"
                     value={r.time}
                     onChange={(e) => props.onChange(i, { time: e.target.value })}
@@ -265,12 +307,13 @@ export function SimulationPanel(props: Props) {
               <div className="mt-2 border-t border-slate-100 pt-2">
                 <JourneySummary
                   journey={state.candidates[i]?.[props.choice[i] ?? 0]?.journey ?? null}
-                  start={state.starts[i] ?? null}
+                  start={arrive ? null : (state.starts[i] ?? null)}
+                  deadline={deadline(i)}
                 />
                 <CandidateList
                   candidates={state.candidates[i] ?? []}
                   selected={props.choice[i] ?? 0}
-                  start={state.starts[i] ?? null}
+                  start={arrive ? null : (state.starts[i] ?? null)}
                   onChoose={(k) => props.onChoose(i, k)}
                 />
               </div>

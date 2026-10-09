@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { earliestJourney, journeyCandidates, positionAt, type Connections, type Geometry } from './simulate';
+import {
+  arrivalCandidates,
+  earliestJourney,
+  journeyCandidates,
+  latestJourney,
+  positionAt,
+  type Connections,
+  type Geometry,
+} from './simulate';
 import type { Footpaths } from './lastTrain';
 
 const t = (hhmm: string) => {
@@ -173,5 +181,35 @@ describe('earliestJourney の条件', () => {
     const skipFirst = (k: number) => c.trip[k] === 0 && c.from[k] === c.stations.indexOf('A1');
     const j = earliestJourney(c, noFoot, ['A1'], ['A3'], t('7:59'), { skip: skipFirst })!;
     expect(j.arr).toBe(t('8:20'));
+  });
+});
+
+describe('latestJourney（到着時刻を指定）', () => {
+  const c = conns([
+    { from: 'A1', to: 'A2', dep: '8:00', arr: '8:20', trip: 0 },
+    { from: 'A1', to: 'A2', dep: '8:10', arr: '8:30', trip: 1 },
+    { from: 'A1', to: 'A2', dep: '8:20', arr: '8:40', trip: 2 },
+  ]);
+
+  it('締切ちょうどに着く列車を選ぶ（出発が最も遅いもの）', () => {
+    const j = latestJourney(c, noFoot, ['A1'], ['A2'], t('8:30'))!;
+    expect(j.dep).toBe(t('8:10'));
+    expect(j.arr).toBe(t('8:30'));
+    expect(j.start).toBe(j.dep);
+  });
+
+  it('締切に間に合わない列車は選ばない', () => {
+    expect(latestJourney(c, noFoot, ['A1'], ['A2'], t('8:39'))!.arr).toBe(t('8:30'));
+  });
+
+  it('間に合う列車が無ければ null', () => {
+    expect(latestJourney(c, noFoot, ['A1'], ['A2'], t('8:19'))).toBeNull();
+  });
+
+  it('候補は締切に近い順で、1 本前も入る', () => {
+    const list = arrivalCandidates(c, noFoot, ['A1'], ['A2'], t('8:45'), () => 'A');
+    expect(list.map((x) => x.journey.arr)).toEqual([t('8:40'), t('8:30'), t('8:20')]);
+    expect(list[0]!.labels).toContain('間に合う最終');
+    expect(list[1]!.labels).toContain('1本前');
   });
 });
