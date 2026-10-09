@@ -174,9 +174,6 @@ export function buildLayers({
       id: 'stations',
       data: network.stations,
       pickable: true,
-      // カーソルを乗せた駅を少し強調する
-      autoHighlight: true,
-      highlightColor: [30, 30, 30, 90],
       getPosition: dotPosition,
       getRadius: radius,
       radiusUnits: 'pixels',
@@ -290,4 +287,63 @@ export function buildLayers({
       onClick,
     }),
   ];
+}
+
+/** カーソルを乗せている駅・路線 */
+export interface HoverTarget {
+  stationId?: string;
+  railwayId?: string;
+}
+
+/**
+ * カーソルを乗せている路線・駅を少し目立たせるレイヤー（ほかのレイヤーの上に重ねる）。
+ * 路線: 白い縁取りをつけて少し太く。駅: 路線色の輪で少し大きく
+ */
+export function buildHoverLayers(target: HoverTarget | null, scale: DepthScale): Layer[] {
+  if (!target) return [];
+  const z = (s: Station) => elevationOf(s.depth, scale);
+  if (target.railwayId) {
+    const r = network.railways.find((x) => x.id === target.railwayId);
+    if (!r) return [];
+    const path = r.stations.map((id) => {
+      const s = stationById.get(id)!;
+      return [s.coord[0], s.coord[1], z(s)] as Position3;
+    });
+    const color = hexToRgb(r.color);
+    const common = {
+      data: [path],
+      getPath: (d: Position3[]) => d,
+      widthUnits: 'pixels' as const,
+      jointRounded: true,
+      capRounded: true,
+      billboard: true,
+      parameters: { depthCompare: 'always' as const },
+    };
+    return [
+      new PathLayer<Position3[]>({ ...common, id: 'hover-casing', getColor: [255, 255, 255, 235], getWidth: 9.5 }),
+      new PathLayer<Position3[]>({ ...common, id: 'hover-railway', getColor: [...color, 255], getWidth: 6.5 }),
+    ];
+  }
+  if (target.stationId) {
+    const s = stationById.get(target.stationId);
+    if (!s) return [];
+    const color = hexToRgb(network.railways.find((x) => x.id === s.railway)!.color);
+    return [
+      new ScatterplotLayer<Station>({
+        id: 'hover-station',
+        data: [s],
+        getPosition: (d) => [d.coord[0], d.coord[1], z(d) + 2 * DOT_LIFT_PX * scale.metersPerPixel],
+        getRadius: 8,
+        radiusUnits: 'pixels',
+        billboard: true,
+        stroked: true,
+        getFillColor: [255, 255, 255, 255],
+        getLineColor: [...color, 255],
+        getLineWidth: 3,
+        lineWidthUnits: 'pixels',
+        parameters: { depthCompare: 'always' },
+      }),
+    ];
+  }
+  return [];
 }

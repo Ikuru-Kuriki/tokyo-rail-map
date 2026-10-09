@@ -5,7 +5,7 @@ import { network, placeById, placeByStation, railwayById, railwaySymbol, station
 import { StationCode } from '../components/StationCode';
 import type { Route } from '../domain/route';
 import type { Place, Station } from '../domain/types';
-import { buildLayers, type TrainMarker } from './layers';
+import { buildHoverLayers, buildLayers, type HoverTarget, type TrainMarker } from './layers';
 import { placeLabels, type LabelCandidate } from './labels';
 import { sideViewFor } from './camera';
 import { BACKGROUND, depthScale, elevationOf } from './style';
@@ -33,6 +33,8 @@ interface Hover {
   text: string;
   /** 路線のときの色 */
   color?: string;
+  /** 地図上で目立たせる駅・路線 */
+  target: HoverTarget;
 }
 
 /** カーソルの下にあるものから、表示する文を作る。駅でも路線でもなければ null */
@@ -41,11 +43,18 @@ function hoverOf(info: PickingInfo): Hover | null {
   if (info.layer.id === 'stations' || info.layer.id === 'focus-stations') {
     const s = info.object as Station;
     const code = s.code ? `${s.code} ` : '';
-    return { x: info.x, y: info.y, text: `${code}${s.ja}（${railwayById.get(s.railway)!.ja}）` };
+    return {
+      x: info.x,
+      y: info.y,
+      text: `${code}${s.ja}（${railwayById.get(s.railway)!.ja}）`,
+      target: { stationId: s.id },
+    };
   }
   if (info.layer.id === 'railways') {
     const r = railwayById.get((info.object as { id: string }).id);
-    return r ? { x: info.x, y: info.y, text: `${r.ja}（クリックで強調）`, color: r.color } : null;
+    return r
+      ? { x: info.x, y: info.y, text: `${r.ja}（クリックで強調）`, color: r.color, target: { railwayId: r.id } }
+      : null;
   }
   return null;
 }
@@ -146,6 +155,14 @@ export function RailMap({
     () => buildLayers({ route, endpoints, stationColors, focusRailways, onPick, onPickRailway, scale }),
     [route, endpoints, stationColors, focusRailways, onPick, onPickRailway, scale],
   );
+  // カーソルを乗せた駅・路線の強調。同じものの上で動かしている間は作り直さない
+  const hoverKey = hover ? `${hover.target.stationId ?? ''}|${hover.target.railwayId ?? ''}` : '';
+  const hoverLayers = useMemo(
+    () => (hover ? buildHoverLayers(hover.target, scale) : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [hoverKey, scale],
+  );
+  const allLayers = useMemo(() => [...layers, ...hoverLayers], [layers, hoverLayers]);
   // シミュレーションの電車は駅名ラベルより手前に出すため、HTML で重ねる（位置は線路の高さで投影）
   const trainMarkers = useMemo(() => {
     if (!width || !height || trains.length === 0) return [];
@@ -221,7 +238,7 @@ export function RailMap({
         viewState={viewState}
         onViewStateChange={({ viewState: v }) => setViewState(v as MapViewState)}
         controller={{ dragRotate: true, touchRotate: true, inertia: 300 }}
-        layers={layers}
+        layers={allLayers}
         getCursor={({ isHovering, isDragging }) => (isDragging ? 'grabbing' : isHovering ? 'pointer' : 'grab')}
         // 駅の点・線の近くでもクリックできるように
         pickingRadius={6}
