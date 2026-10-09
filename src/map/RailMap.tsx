@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import DeckGL from '@deck.gl/react';
-import { FlyToInterpolator, MapView, WebMercatorViewport, type MapViewState } from '@deck.gl/core';
+import { FlyToInterpolator, MapView, WebMercatorViewport, type MapViewState, type PickingInfo } from '@deck.gl/core';
 import { network, placeById, placeByStation, railwayById, railwaySymbol, stationById } from '../data';
 import { StationCode } from '../components/StationCode';
 import type { Route } from '../domain/route';
@@ -24,14 +24,31 @@ const INITIAL_VIEW: MapViewState = {
 const VIEW = new MapView({ repeat: false });
 const NO_RAILWAYS: string[] = [];
 const NO_TRAINS: TrainMarker[] = [];
-const TOOLTIP_STYLE = {
-  background: 'rgba(15, 23, 42, 0.92)',
-  color: 'white',
-  fontSize: '12px',
-  fontWeight: '600',
-  padding: '4px 8px',
-  borderRadius: '6px',
-};
+/** マウスで操作しているとき（スマホでは出さない） */
+const canHover = typeof window !== 'undefined' && window.matchMedia?.('(hover: hover)').matches;
+
+interface Hover {
+  x: number;
+  y: number;
+  text: string;
+  /** 路線のときの色 */
+  color?: string;
+}
+
+/** カーソルの下にあるものから、表示する文を作る。駅でも路線でもなければ null */
+function hoverOf(info: PickingInfo): Hover | null {
+  if (!canHover || !info.object || !info.layer) return null;
+  if (info.layer.id === 'stations' || info.layer.id === 'focus-stations') {
+    const s = info.object as Station;
+    const code = s.code ? `${s.code} ` : '';
+    return { x: info.x, y: info.y, text: `${code}${s.ja}（${railwayById.get(s.railway)!.ja}）` };
+  }
+  if (info.layer.id === 'railways') {
+    const r = railwayById.get((info.object as { id: string }).id);
+    return r ? { x: info.x, y: info.y, text: `${r.ja}（クリックで強調）`, color: r.color } : null;
+  }
+  return null;
+}
 
 interface Props {
   route: Route | null;
@@ -76,6 +93,7 @@ export function RailMap({
   const ref = useRef<HTMLDivElement>(null);
   const { width, height } = useSize(ref);
   const [viewState, setViewState] = useState<MapViewState>(INITIAL_VIEW);
+  const [hover, setHover] = useState<Hover | null>(null);
 
   // 路線を強調したら、その路線を真横に近い角度から見る
   useEffect(() => {
@@ -207,20 +225,9 @@ export function RailMap({
         getCursor={({ isHovering, isDragging }) => (isDragging ? 'grabbing' : isHovering ? 'pointer' : 'grab')}
         // 駅の点・線の近くでもクリックできるように
         pickingRadius={6}
-        // 名前の出ていない駅でも、カーソルを乗せると駅名と路線が分かる
-        getTooltip={({ object, layer }) => {
-          if (!object || !layer) return null;
-          if (layer.id === 'stations' || layer.id === 'focus-stations') {
-            const s = object as Station;
-            const code = s.code ? `${s.code} ` : '';
-            return { text: `${code}${s.ja}（${railwayById.get(s.railway)!.ja}）`, style: TOOLTIP_STYLE };
-          }
-          if (layer.id === 'railways') {
-            const r = railwayById.get((object as { id: string }).id);
-            return r ? { text: `${r.ja}（クリックで強調）`, style: TOOLTIP_STYLE } : null;
-          }
-          return null;
-        }}
+        // 名前の出ていない駅でも、カーソルを乗せると駅名と路線が分かる（表示は下の HTML で自前で出す）
+        onHover={(info) => setHover(hoverOf(info))}
+        onDragStart={() => setHover(null)}
       />
       <div className="pointer-events-none absolute inset-0">
         {labels.map((l) => {
@@ -233,6 +240,7 @@ export function RailMap({
               aria-label={`${l.ja}駅を選ぶ`}
               className={`station-label pointer-events-auto absolute flex cursor-pointer items-center justify-center gap-1 rounded-lg px-1.5 transition-transform hover:-translate-y-0.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900 ${active ? 'bg-slate-900 text-white' : 'bg-white text-slate-900 hover:bg-slate-50'} ${l.dim ? 'opacity-40 hover:opacity-80' : ''}`}
               style={{ left: l.left, top: l.top, width: l.width, height: l.height }}
+              onMouseEnter={() => setHover(null)}
               onClick={() => {
                 const place = placeById.get(l.id);
                 if (place) onPick(place);
@@ -273,6 +281,27 @@ export function RailMap({
             </span>
           </div>
         ))}
+        {hover && (
+          <div
+            role="tooltip"
+            className="absolute z-10 flex items-center gap-1.5 rounded-md bg-slate-900/95 px-2 py-1 text-xs font-semibold whitespace-nowrap text-white shadow-lg"
+            // カーソルの右下に出し、画面の右端・下端でははみ出さないよう左上に回す
+            style={{
+              left: hover.x + 14,
+              top: hover.y + 16,
+              transform: `translate(${hover.x > width - 240 ? 'calc(-100% - 28px)' : '0'}, ${hover.y > height - 60 ? 'calc(-100% - 32px)' : '0'})`,
+            }}
+          >
+            {hover.color && (
+              <span
+                className="h-2.5 w-2.5 rounded-full ring-1 ring-white"
+                style={{ background: hover.color }}
+                aria-hidden="true"
+              />
+            )}
+            {hover.text}
+          </div>
+        )}
         {trainMarkers.map((t) => (
           <img
             key={t.id}
