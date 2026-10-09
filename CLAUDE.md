@@ -22,6 +22,8 @@
 - 最近使った駅は `src/data/history.ts`（localStorage。読み書きは必ず try/catch。使えなくても動くこと）
 - 路線の強調は複数可（`focusRailways: string[]`）。カメラは `src/map/camera.ts` の `sideViewFor`（駅の広がりの主成分を左右に）
 - 駅ナンバリングは `npm run data` で `Station.code` に入る。補正の表は `src/domain/numbering.ts`（規則の駅名が無いと生成が止まる）
+- シミュレーションは `src/domain/simulate.ts`（前向き Connection Scan と、時刻 t の位置の補間）。
+  時刻表は `public/timetable/day/{weekday,holiday}/{HH}.json`（1 時間ごと）と `index.json`。必要な時間だけ `src/data/dayTimetable.ts` で読み込む
 - 時刻表は終電タブを開いたときに `src/data/timetable.ts` で遅延読み込みする
 - 終電マップの色は `src/domain/lastTrainColors.ts`（1 色の連続スケール。色を増やすときは同じ青の段階から）
 - UI の文言は日本語

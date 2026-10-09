@@ -39,6 +39,13 @@ export function greyOf([r, g, b]: [number, number, number]): [number, number, nu
 }
 const UNREACHABLE: [number, number, number] = [201, 197, 189];
 
+export interface TrainMarker {
+  id: string;
+  coord: [number, number];
+  depth: number;
+  icon: string;
+}
+
 export interface LayerState {
   route: Route | null;
   /** 出発・到着など、黒い点で示す駅 */
