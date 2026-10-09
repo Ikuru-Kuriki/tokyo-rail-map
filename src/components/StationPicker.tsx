@@ -1,5 +1,6 @@
 import { useId, useState } from 'react';
 import { network, railwaysOf } from '../data';
+import { clearStationHistory, useStationHistory } from '../data/history';
 import { searchPlaces } from '../domain/search';
 import type { Place } from '../domain/types';
 import { LineDots } from './LineDots';
@@ -17,7 +18,10 @@ export function StationPicker({ label, value, onChange, active, onFocus }: Props
   const [query, setQuery] = useState('');
   const [editing, setEditing] = useState(false);
   const [highlight, setHighlight] = useState(0);
-  const results = editing ? searchPlaces(network.places, query) : [];
+  const history = useStationHistory();
+  // 何も入力していないときは最近使った駅を出す
+  const showingHistory = editing && query.trim() === '';
+  const results = !editing ? [] : showingHistory ? history : searchPlaces(network.places, query);
 
   const choose = (p: Place) => {
     onChange(p);
@@ -59,8 +63,24 @@ export function StationPicker({ label, value, onChange, active, onFocus }: Props
       {results.length > 0 && (
         <ul
           role="listbox"
+          aria-label={showingHistory ? '最近使った駅' : '駅の候補'}
           className="absolute z-10 mt-1 max-h-72 w-full overflow-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg"
         >
+          {showingHistory && (
+            <li role="presentation" className="flex items-center justify-between px-3 pt-1 pb-1.5 text-xs text-slate-500">
+              <span className="font-semibold">最近使った駅</span>
+              <button
+                type="button"
+                className="rounded px-1.5 py-0.5 hover:bg-slate-100 hover:text-slate-700"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  clearStationHistory();
+                }}
+              >
+                履歴を消す
+              </button>
+            </li>
+          )}
           {results.map((p, i) => (
             <li
               key={p.id}

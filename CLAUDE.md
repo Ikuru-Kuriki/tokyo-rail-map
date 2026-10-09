@@ -19,6 +19,8 @@
 - 駅は「路線ごとの駅（Station）」と「同じ名前の駅の集まり（Place）」を分けて扱う。検索・表示は Place、経路探索は Station
 - 乗換は `network.transfers`（同じ構内 / 徒歩連絡）から作る
 - 終電は `src/domain/lastTrain.ts`（逆向き Connection Scan）。時刻は「営業日の分」（0:30 = 1470）で扱い、表示は `formatMinutes`
+- 最近使った駅は `src/data/history.ts`（localStorage。読み書きは必ず try/catch。使えなくても動くこと）
+- 路線の強調中のカメラは `src/map/camera.ts` の `sideViewFor`
 - 時刻表は終電タブを開いたときに `src/data/timetable.ts` で遅延読み込みする
 - 終電マップの色は `src/domain/lastTrainColors.ts`（1 色の連続スケール。色を増やすときは同じ青の段階から）
 - UI の文言は日本語

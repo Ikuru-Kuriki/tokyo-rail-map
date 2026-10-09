@@ -11,6 +11,7 @@ import type { Route } from '../domain/route';
 import type { Place } from '../domain/types';
 import { buildLayers } from './layers';
 import { placeLabels, type LabelCandidate } from './labels';
+import { sideViewFor } from './camera';
 import { BACKGROUND, depthExaggeration } from './style';
 
 const INITIAL_VIEW: MapViewState = {
@@ -19,9 +20,9 @@ const INITIAL_VIEW: MapViewState = {
   zoom: 9.7,
   pitch: 52,
   bearing: -8,
-  minZoom: 8.5,
+  minZoom: 7.5,
   maxZoom: 14,
-  maxPitch: 70,
+  maxPitch: 85,
 };
 
 const VIEW = new MapView({ repeat: false });
@@ -34,7 +35,10 @@ interface Props {
   stationColors?: Map<string, [number, number, number]> | null;
   /** ラベルに添える時刻（place ID → "0:12"） */
   placeTimes?: Map<string, string> | null;
+  /** 強調する路線。ほかの路線はグレーになる */
+  focusRailway?: string | null;
   onPick: (place: Place) => void;
+  onPickRailway?: (railwayId: string) => void;
 }
 
 function useSize(ref: React.RefObject<HTMLDivElement | null>) {
@@ -51,10 +55,28 @@ function useSize(ref: React.RefObject<HTMLDivElement | null>) {
   return size;
 }
 
-export function RailMap({ route, endpoints, stationColors = null, placeTimes = null, onPick }: Props) {
+export function RailMap({
+  route,
+  endpoints,
+  stationColors = null,
+  placeTimes = null,
+  focusRailway = null,
+  onPick,
+  onPickRailway,
+}: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const { width, height } = useSize(ref);
   const [viewState, setViewState] = useState<MapViewState>(INITIAL_VIEW);
+
+  // 路線を強調したら、その路線を真横に近い角度から見る
+  useEffect(() => {
+    if (!focusRailway || !width) return;
+    const railway = network.railways.find((r) => r.id === focusRailway);
+    if (!railway) return;
+    const coords = railway.stations.map((id) => stationById.get(id)!.coord);
+    const view = sideViewFor(coords, width >= 768 ? width - 360 : width - 32);
+    setViewState((v) => ({ ...v, ...view, transitionDuration: 1200, transitionInterpolator: new FlyToInterpolator() }));
+  }, [focusRailway, width]);
 
   // 経路が決まったら、経路全体が見えるようにカメラを寄せる
   useEffect(() => {
@@ -89,10 +111,11 @@ export function RailMap({ route, endpoints, stationColors = null, placeTimes = n
 
   // 深さの強調倍率はズーム 0.25 刻みで変える（毎フレーム作り直さないように）
   const zoomStep = Math.round(viewState.zoom * 4) / 4;
-  const exaggeration = useMemo(() => depthExaggeration(zoomStep), [zoomStep]);
+  const viewportSize = Math.min(width, height) || 900;
+  const exaggeration = useMemo(() => depthExaggeration(zoomStep, viewportSize), [zoomStep, viewportSize]);
   const layers = useMemo(
-    () => buildLayers({ route, endpoints, stationColors, onPick, exaggeration }),
-    [route, endpoints, stationColors, onPick, exaggeration],
+    () => buildLayers({ route, endpoints, stationColors, focusRailway, onPick, onPickRailway, exaggeration }),
+    [route, endpoints, stationColors, focusRailway, onPick, onPickRailway, exaggeration],
   );
   const endpointIds = useMemo(() => new Set(endpoints.map((p) => p.id)), [endpoints]);
 
@@ -109,16 +132,19 @@ export function RailMap({ route, endpoints, stationColors = null, placeTimes = n
       // ラベルは地面の高さに置く（地下の駅とは立坑でつながる）
       const [x, y] = viewport.project([p.coord[0], p.coord[1], 0]);
       let priority = p.lines;
+      const onFocus = focusRailway !== null && p.stations.some((id) => stationById.get(id)!.railway === focusRailway);
+      if (onFocus) priority += 50;
       if (routePlaces.has(p.id)) priority += 100;
       const pinned = endpointIds.has(p.id);
       if (pinned) priority += 200;
       if (priority < minLines) continue;
       const time = placeTimes?.get(p.id);
-      candidates.push({ id: p.id, ja: p.ja, en: p.en.toUpperCase(), time, x: x!, y: y!, priority, pinned });
+      const dim = focusRailway !== null && !onFocus && !pinned;
+      candidates.push({ id: p.id, ja: p.ja, en: p.en.toUpperCase(), time, x: x!, y: y!, priority, pinned, dim });
     }
     const max = Math.round((width * height) / 22000);
     return placeLabels(candidates, width, height, max);
-  }, [viewState, width, height, route, endpointIds, placeTimes]);
+  }, [viewState, width, height, route, endpointIds, placeTimes, focusRailway]);
 
   return (
     <div ref={ref} className="absolute inset-0 overflow-hidden" style={{ background: BACKGROUND }}>
@@ -136,7 +162,7 @@ export function RailMap({ route, endpoints, stationColors = null, placeTimes = n
           return (
             <div
               key={l.id}
-              className={`station-label absolute flex flex-col items-center justify-center rounded-lg ${active ? 'bg-slate-900 text-white' : 'bg-white text-slate-900'}`}
+              className={`station-label absolute flex flex-col items-center justify-center rounded-lg ${active ? 'bg-slate-900 text-white' : 'bg-white text-slate-900'} ${l.dim ? 'opacity-40' : ''}`}
               style={{ left: l.left, top: l.top, width: l.width, height: l.height }}
             >
               <span className="text-[15px] leading-tight font-bold">

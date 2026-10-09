@@ -11,6 +11,8 @@ export interface LabelCandidate {
   priority: number;
   /** 出発・到着駅など、画面端でも必ず出すラベル（画面内に寄せる） */
   pinned?: boolean;
+  /** 強調中の路線に無い駅（薄く表示する） */
+  dim?: boolean;
 }
 
 export interface PlacedLabel extends LabelCandidate {
