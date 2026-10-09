@@ -1,12 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import DeckGL from '@deck.gl/react';
-import {
-  FlyToInterpolator,
-  MapView,
-  WebMercatorViewport,
-  type MapViewState,
-} from '@deck.gl/core';
-import { network, placeByStation, stationById } from '../data';
+import { FlyToInterpolator, MapView, WebMercatorViewport, type MapViewState } from '@deck.gl/core';
+import { network, placeByStation, railwayById, railwaySymbol, stationById } from '../data';
+import { StationCode } from '../components/StationCode';
 import type { Route } from '../domain/route';
 import type { Place } from '../domain/types';
 import { buildLayers } from './layers';
@@ -26,6 +22,7 @@ const INITIAL_VIEW: MapViewState = {
 };
 
 const VIEW = new MapView({ repeat: false });
+const NO_RAILWAYS: string[] = [];
 
 interface Props {
   route: Route | null;
@@ -35,8 +32,8 @@ interface Props {
   stationColors?: Map<string, [number, number, number]> | null;
   /** ラベルに添える時刻（place ID → "0:12"） */
   placeTimes?: Map<string, string> | null;
-  /** 強調する路線。ほかの路線はグレーになる */
-  focusRailway?: string | null;
+  /** 強調する路線（複数可）。ほかの路線はグレーになる */
+  focusRailways?: string[];
   onPick: (place: Place) => void;
   onPickRailway?: (railwayId: string) => void;
 }
@@ -60,7 +57,7 @@ export function RailMap({
   endpoints,
   stationColors = null,
   placeTimes = null,
-  focusRailway = null,
+  focusRailways = NO_RAILWAYS,
   onPick,
   onPickRailway,
 }: Props) {
@@ -70,13 +67,14 @@ export function RailMap({
 
   // 路線を強調したら、その路線を真横に近い角度から見る
   useEffect(() => {
-    if (!focusRailway || !width) return;
-    const railway = network.railways.find((r) => r.id === focusRailway);
-    if (!railway) return;
-    const coords = railway.stations.map((id) => stationById.get(id)!.coord);
+    if (focusRailways.length === 0 || !width) return;
+    const coords = network.railways
+      .filter((r) => focusRailways.includes(r.id))
+      .flatMap((r) => r.stations.map((id) => stationById.get(id)!.coord));
+    if (coords.length === 0) return;
     const view = sideViewFor(coords, width >= 768 ? width - 360 : width - 32);
     setViewState((v) => ({ ...v, ...view, transitionDuration: 1200, transitionInterpolator: new FlyToInterpolator() }));
-  }, [focusRailway, width]);
+  }, [focusRailways, width]);
 
   // 経路が決まったら、経路全体が見えるようにカメラを寄せる
   useEffect(() => {
@@ -94,7 +92,7 @@ export function RailMap({
         padding:
           width >= 768
             ? { top: 80, bottom: 80, left: 400, right: 100 }
-            : { top: 250, bottom: Math.min(height * 0.35, 300), left: 30, right: 30 },
+            : { top: Math.min(height * 0.48, 400), bottom: Math.min(height * 0.3, 260), left: 40, right: 40 },
         maxZoom: 13,
       },
     );
@@ -114,16 +112,20 @@ export function RailMap({
   const viewportSize = Math.min(width, height) || 900;
   const exaggeration = useMemo(() => depthExaggeration(zoomStep, viewportSize), [zoomStep, viewportSize]);
   const layers = useMemo(
-    () => buildLayers({ route, endpoints, stationColors, focusRailway, onPick, onPickRailway, exaggeration }),
-    [route, endpoints, stationColors, focusRailway, onPick, onPickRailway, exaggeration],
+    () => buildLayers({ route, endpoints, stationColors, focusRailways, onPick, onPickRailway, exaggeration }),
+    [route, endpoints, stationColors, focusRailways, onPick, onPickRailway, exaggeration],
   );
   const endpointIds = useMemo(() => new Set(endpoints.map((p) => p.id)), [endpoints]);
 
   const labels = useMemo(() => {
     if (!width || !height) return [];
     const viewport = new WebMercatorViewport({ ...viewState, width, height });
+    // 番号を出す路線: 強調中の路線と、経路で通る路線
+    const codeRailways = new Set([...focusRailways, ...(route?.legs.map((l) => l.railway) ?? [])]);
     const routePlaces = new Set(
-      route?.legs.flatMap((l) => [l.stations[0]!, l.stations[l.stations.length - 1]!]).map((id) => placeByStation.get(id)!.id),
+      route?.legs
+        .flatMap((l) => [l.stations[0]!, l.stations[l.stations.length - 1]!])
+        .map((id) => placeByStation.get(id)!.id),
     );
     // ズームが小さいうちは乗換の多い駅だけにする
     const minLines = viewState.zoom < 10.3 ? 3 : viewState.zoom < 11.3 ? 2 : 1;
@@ -132,19 +134,45 @@ export function RailMap({
       // ラベルは地面の高さに置く（地下の駅とは立坑でつながる）
       const [x, y] = viewport.project([p.coord[0], p.coord[1], 0]);
       let priority = p.lines;
-      const onFocus = focusRailway !== null && p.stations.some((id) => stationById.get(id)!.railway === focusRailway);
+      const onFocus =
+        focusRailways.length > 0 && p.stations.some((id) => focusRailways.includes(stationById.get(id)!.railway));
       if (onFocus) priority += 50;
       if (routePlaces.has(p.id)) priority += 100;
       const pinned = endpointIds.has(p.id);
       if (pinned) priority += 200;
       if (priority < minLines) continue;
       const time = placeTimes?.get(p.id);
-      const dim = focusRailway !== null && !onFocus && !pinned;
-      candidates.push({ id: p.id, ja: p.ja, en: p.en.toUpperCase(), time, x: x!, y: y!, priority, pinned, dim });
+      const dim = focusRailways.length > 0 && !onFocus && !pinned;
+      const codes = p.stations
+        .map((id) => stationById.get(id)!)
+        .filter((s) => s.code && codeRailways.has(s.railway))
+        .map((s) => ({ code: s.code!, color: railwayById.get(s.railway)!.color }))
+        .filter((c, i, all) => all.findIndex((d) => d.code === c.code) === i)
+        .slice(0, 3);
+      candidates.push({ id: p.id, ja: p.ja, en: p.en.toUpperCase(), time, codes, x: x!, y: y!, priority, pinned, dim });
     }
     const max = Math.round((width * height) / 22000);
     return placeLabels(candidates, width, height, max);
-  }, [viewState, width, height, route, endpointIds, placeTimes, focusRailway]);
+  }, [viewState, width, height, route, endpointIds, placeTimes, focusRailways]);
+
+  // 強調中の路線の端に路線記号（"JK" など）を出す。画面で右にある方の端に置く
+  const lineBadges = useMemo(() => {
+    if (!width || !height || focusRailways.length === 0) return [];
+    const viewport = new WebMercatorViewport({ ...viewState, width, height });
+    return focusRailways.flatMap((rid) => {
+      const r = railwayById.get(rid);
+      const sym = railwaySymbol(rid);
+      if (!r || !sym) return [];
+      const ends = [r.stations[0]!, r.stations[r.stations.length - 1]!].map((id) => {
+        const c = stationById.get(id)!.coord;
+        const [x, y] = viewport.project([c[0], c[1], 0]);
+        return { x: x!, y: y! };
+      });
+      const end = ends[0]!.x > ends[1]!.x ? ends[0]! : ends[1]!;
+      if (end.x < 0 || end.y < 0 || end.x > width || end.y > height) return [];
+      return [{ id: rid, sym, color: r.color, x: end.x, y: end.y }];
+    });
+  }, [viewState, width, height, focusRailways]);
 
   return (
     <div ref={ref} className="absolute inset-0 overflow-hidden" style={{ background: BACKGROUND }}>
@@ -162,23 +190,44 @@ export function RailMap({
           return (
             <div
               key={l.id}
-              className={`station-label absolute flex flex-col items-center justify-center rounded-lg ${active ? 'bg-slate-900 text-white' : 'bg-white text-slate-900'} ${l.dim ? 'opacity-40' : ''}`}
+              className={`station-label absolute flex items-center justify-center gap-1 rounded-lg px-1.5 ${active ? 'bg-slate-900 text-white' : 'bg-white text-slate-900'} ${l.dim ? 'opacity-40' : ''}`}
               style={{ left: l.left, top: l.top, width: l.width, height: l.height }}
             >
-              <span className="text-[15px] leading-tight font-bold">
-                {l.ja}
-                {l.time && (
-                  <span className={`ml-1.5 tabular-nums ${active ? 'text-sky-300' : 'text-[#1c5cab]'}`}>{l.time}</span>
-                )}
-              </span>
-              <span
-                className={`text-[10px] leading-tight font-semibold tracking-[0.12em] ${active ? 'text-slate-300' : 'text-slate-400'}`}
-              >
-                {l.en}
+              {l.codes?.map((c) => (
+                <StationCode key={c.code} code={c.code} color={c.color} />
+              ))}
+              <span className="flex min-w-0 flex-1 flex-col items-center">
+                <span className="text-[15px] leading-tight font-bold">
+                  {l.ja}
+                  {l.time && (
+                    <span className={`ml-1.5 tabular-nums ${active ? 'text-sky-300' : 'text-[#1c5cab]'}`}>
+                      {l.time}
+                    </span>
+                  )}
+                </span>
+                <span
+                  className={`text-[10px] leading-tight font-semibold tracking-[0.12em] ${active ? 'text-slate-300' : 'text-slate-400'}`}
+                >
+                  {l.en}
+                </span>
               </span>
             </div>
           );
         })}
+        {lineBadges.map((b) => (
+          <div
+            key={b.id}
+            className="station-label absolute flex h-9 w-9 items-center justify-center rounded-lg bg-white"
+            style={{ left: b.x + 12, top: b.y - 18 }}
+          >
+            <span
+              className="flex h-7 w-7 items-center justify-center rounded-md border-[3px] bg-white text-[11px] font-black text-slate-900"
+              style={{ borderColor: b.color }}
+            >
+              {b.sym}
+            </span>
+          </div>
+        ))}
       </div>
     </div>
   );

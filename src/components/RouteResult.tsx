@@ -1,4 +1,5 @@
 import { railwayById, stationById } from '../data';
+import { StationName } from './StationName';
 import type { Route } from '../domain/route';
 import type { Place } from '../domain/types';
 
@@ -38,7 +39,9 @@ export function RouteResult({ route, from, to }: Props) {
                 style={{ background: railway.color }}
               />
               <span className="absolute top-1 left-0.5 h-4 w-4 rounded-full border-2 border-slate-900 bg-white" />
-              <div className="pb-1 font-semibold">{first.ja}</div>
+              <div className="pb-1 font-semibold">
+                <StationName id={first.id} />
+              </div>
               <div className="pb-2 text-sm text-slate-500">
                 <span className="font-semibold" style={{ color: railway.color }}>
                   {railway.ja}
@@ -48,7 +51,9 @@ export function RouteResult({ route, from, to }: Props) {
               {i === route.legs.length - 1 && (
                 <>
                   <span className="absolute bottom-0 left-0.5 h-4 w-4 rounded-full border-2 border-slate-900 bg-slate-900" />
-                  <div className="font-semibold">{last.ja}</div>
+                  <div className="font-semibold">
+                    <StationName id={last.id} />
+                  </div>
                 </>
               )}
             </li>

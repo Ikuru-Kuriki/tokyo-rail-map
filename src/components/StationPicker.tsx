@@ -1,9 +1,10 @@
 import { useId, useState } from 'react';
-import { network, railwaysOf } from '../data';
+import { network, railwaysOf, stationCode } from '../data';
 import { clearStationHistory, useStationHistory } from '../data/history';
 import { searchPlaces } from '../domain/search';
 import type { Place } from '../domain/types';
 import { LineDots } from './LineDots';
+import { StationCode } from './StationCode';
 
 interface Props {
   label: string;
@@ -67,7 +68,10 @@ export function StationPicker({ label, value, onChange, active, onFocus }: Props
           className="absolute z-10 mt-1 max-h-72 w-full overflow-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg"
         >
           {showingHistory && (
-            <li role="presentation" className="flex items-center justify-between px-3 pt-1 pb-1.5 text-xs text-slate-500">
+            <li
+              role="presentation"
+              className="flex items-center justify-between px-3 pt-1 pb-1.5 text-xs text-slate-500"
+            >
               <span className="font-semibold">最近使った駅</span>
               <button
                 type="button"
@@ -96,12 +100,41 @@ export function StationPicker({ label, value, onChange, active, onFocus }: Props
               <span className="font-semibold">{p.ja}</span>
               <span className="truncate text-xs tracking-wide text-slate-400 uppercase">{p.en}</span>
               <span className="ml-auto">
-                <LineDots railways={railwaysOf(p)} />
+                <PlaceCodes place={p} />
               </span>
             </li>
           ))}
         </ul>
       )}
     </div>
+  );
+}
+
+/** 駅の番号（無い路線は色の丸）を並べる */
+function PlaceCodes({ place }: { place: Place }) {
+  const codes = place.stations
+    .map((id) => stationCode(id))
+    .filter((c): c is NonNullable<typeof c> => c !== null)
+    .filter((c, i, all) => all.findIndex((d) => d.code === c.code) === i);
+  const withCode = new Set(codes.map((c) => c.color));
+  const rest = railwaysOf(place).filter((r) => !withCode.has(r.color));
+  return (
+    <span className="flex items-center gap-0.5">
+      {codes.slice(0, 4).map((c) => (
+        <StationCode key={c.code} code={c.code} color={c.color} size="sm" />
+      ))}
+      {codes.length > 4 && (
+        <span
+          className="pl-0.5 text-[11px] font-semibold text-slate-500"
+          title={codes
+            .slice(4)
+            .map((c) => c.code)
+            .join(' ')}
+        >
+          +{codes.length - 4}
+        </span>
+      )}
+      {rest.length > 0 && <LineDots railways={rest} />}
+    </span>
   );
 }

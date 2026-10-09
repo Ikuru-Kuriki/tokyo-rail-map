@@ -7,8 +7,11 @@
 import { writeFileSync } from 'node:fs';
 import type { Network, Place, Railway, Station } from '../src/domain/types.ts';
 import { stationDepth } from '../src/domain/depth.ts';
+import { numberRailway, SEQUENTIAL } from '../src/domain/numbering.ts';
 
 const BASE = 'https://raw.githubusercontent.com/nagix/mini-tokyo-3d/master/data/';
+/** 駅ナンバリングの元データ（ODPT 由来の short_code） */
+const NUMBERING_URL = 'https://raw.githubusercontent.com/piuccio/open-data-jp-railway-stations/master/stations.json';
 
 const OPERATORS = new Set([
   'JR-East', 'TWR', 'TokyoMetro', 'Toei', 'YokohamaMunicipal', 'Keio', 'Keikyu', 'Keisei',
@@ -40,7 +43,7 @@ interface SrcStation { id: string; railway?: string; coord?: [number, number]; t
 type SrcGroups = string[][][];
 
 async function get<T>(name: string): Promise<T> {
-  const res = await fetch(BASE + name);
+  const res = await fetch(name.startsWith('https://') ? name : BASE + name);
   if (!res.ok) throw new Error(`${name}: ${res.status}`);
   return (await res.json()) as T;
 }
@@ -49,11 +52,17 @@ const round = (n: number) => Math.round(n * 1e5) / 1e5;
 const inBounds = ([lon, lat]: [number, number]) =>
   lon >= BOUNDS.west && lon <= BOUNDS.east && lat >= BOUNDS.south && lat <= BOUNDS.north;
 
-const [srcRailways, srcStations, srcGroups] = await Promise.all([
+interface NumberingGroup { stations: { code: string; short_code?: string }[] }
+
+const [srcRailways, srcStations, srcGroups, numberingGroups] = await Promise.all([
   get<SrcRailway[]>('railways.json'),
   get<SrcStation[]>('stations.json'),
   get<SrcGroups>('station-groups.json'),
+  get<NumberingGroup[]>(NUMBERING_URL),
 ]);
+const sourceCodes = new Map<string, string>();
+for (const g of numberingGroups)
+  for (const s of g.stations) if (s.code && s.short_code) sourceCodes.set(s.code, s.short_code);
 
 const stationById = new Map(srcStations.map((s) => [s.id, s]));
 const railways: Railway[] = [];
@@ -82,6 +91,11 @@ for (const r of srcRailways) {
     color: r.color,
     stations: best.map((s) => s.id),
   });
+  const codes = numberRailway(
+    r.id,
+    best.map((s) => ({ id: s.id, ja: s.title.ja })),
+    sourceCodes,
+  );
   for (const s of best) {
     stations.push({
       id: s.id,
@@ -91,6 +105,7 @@ for (const r of srcRailways) {
       coord: [round(s.coord![0]), round(s.coord![1])],
       // 元データの altitude は「地下なら -1」だけなので、深さは目安の表から付ける
       depth: stationDepth(r.id, s.title.ja, s.altitude === -1 || r.altitude === -1),
+      ...(codes.has(s.id) ? { code: codes.get(s.id)! } : {}),
     });
   }
 }
@@ -135,6 +150,15 @@ for (const t of transfers) {
   }
 }
 
+// 番号の規則の駅名が実データにあるか確かめる（駅名が変わると黙って番号が付かなくなるので）
+for (const rule of SEQUENTIAL) {
+  const names = new Set(stations.filter((s) => s.railway === rule.railway).map((s) => s.ja));
+  if (!names.has(rule.from) || !names.has(rule.toward))
+    throw new Error(`numbering rule for ${rule.railway}: ${rule.from} / ${rule.toward} not found`);
+}
+
 const network: Network = { railways, stations, places, transfers };
 writeFileSync(new URL('../src/data/network.json', import.meta.url), JSON.stringify(network));
-console.log(`railways: ${railways.length}, stations: ${stations.length}, places: ${places.length}`);
+console.log(
+  `railways: ${railways.length}, stations: ${stations.length}, places: ${places.length}, numbered: ${stations.filter((s) => s.code).length}`,
+);
