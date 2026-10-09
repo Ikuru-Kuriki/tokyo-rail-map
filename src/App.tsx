@@ -1,6 +1,7 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { graph, network } from './data';
 import { todayDayType, useTimetable } from './data/timetable';
+import { rememberStation } from './data/history';
 import { journeyToRoute } from './domain/journeyRoute';
 import { buildFootpaths, formatMinutes, journeyFrom, scanLastTrains } from './domain/lastTrain';
 import { bucketOf } from './domain/lastTrainColors';
@@ -13,6 +14,7 @@ import { RouteSearch, type Slot } from './components/RouteSearch';
 import { RouteResult } from './components/RouteResult';
 import { LastTrainSearch, type LastSlot } from './components/LastTrainSearch';
 import { LastTrainResult, Legend } from './components/LastTrainResult';
+import { LineSelect } from './components/LineSelect';
 
 type Mode = 'route' | 'last';
 
@@ -20,6 +22,10 @@ const footpaths = buildFootpaths(network);
 
 export default function App() {
   const [mode, setMode] = useState<Mode>('route');
+  /** 検索パネルを開いているか */
+  const [panelOpen, setPanelOpen] = useState(true);
+  /** 強調する路線（ほかの路線はグレーになる） */
+  const [focusRailway, setFocusRailway] = useState<string | null>(null);
 
   // 経路
   const [from, setFrom] = useState<Place | null>(null);
@@ -87,6 +93,15 @@ export default function App() {
     return m;
   }, [placeLatest]);
 
+  // 選んだ駅を履歴に残す（入力欄で何も打っていないときに出る）
+  useEffect(() => {
+    for (const p of [from, to, home, origin]) if (p) rememberStation(p);
+  }, [from, to, home, origin]);
+
+  const onPickRailway = useCallback((id: string) => {
+    setFocusRailway((cur) => (cur === id ? null : id));
+  }, []);
+
   // 地図上の駅クリック
   const onPick = useCallback(
     (p: Place) => {
@@ -123,85 +138,110 @@ export default function App() {
         endpoints={endpoints}
         stationColors={isLast ? stationColors : null}
         placeTimes={isLast ? placeTimes : null}
+        focusRailway={focusRailway}
         onPick={onPick}
+        onPickRailway={onPickRailway}
       />
       {/* スマホでは検索を上、結果を下に。PC では左上に縦に並べる */}
       <div className="pointer-events-none absolute inset-0 flex flex-col justify-between gap-3 p-3 md:justify-start md:p-4">
         <section className="panel pointer-events-auto w-full rounded-2xl bg-white/95 p-3 backdrop-blur md:w-80 md:p-4">
-          <h1 className="mb-2 flex items-baseline gap-2 md:mb-3">
-            <span className="text-lg font-bold">首都圏 路線図</span>
-            <span className="text-[10px] font-semibold tracking-[0.15em] text-slate-400">TOKYO RAIL MAP</span>
-          </h1>
-          <div role="tablist" className="mb-3 grid grid-cols-2 rounded-lg bg-slate-100 p-0.5 text-sm font-semibold">
-            {(
-              [
-                ['route', '経路'],
-                ['last', '終電'],
-              ] as const
-            ).map(([value, label]) => (
-              <button
-                key={value}
-                type="button"
-                role="tab"
-                aria-selected={mode === value}
-                className={`rounded-md py-1.5 ${mode === value ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}
-                onClick={() => setMode(value)}
-              >
-                {label}
-              </button>
-            ))}
+          <div className={`flex items-center gap-2 ${panelOpen ? 'mb-2 md:mb-3' : ''}`}>
+            <h1 className="flex min-w-0 flex-1 items-baseline gap-2">
+              <span className="text-lg font-bold whitespace-nowrap">首都圏 路線図</span>
+              <span className="hidden truncate text-[10px] font-semibold tracking-[0.15em] text-slate-400 sm:inline">
+                TOKYO RAIL MAP
+              </span>
+            </h1>
+            <button
+              type="button"
+              className="btn shrink-0 !px-2.5 !py-1 text-xs"
+              aria-expanded={panelOpen}
+              aria-controls="search-panel-body"
+              onClick={() => setPanelOpen((o) => !o)}
+            >
+              {panelOpen ? '閉じる ▴' : '開く ▾'}
+            </button>
           </div>
-          {isLast ? (
-            <LastTrainSearch
-              home={home}
-              origin={origin}
-              day={day}
-              slot={lastSlot}
-              onSlot={setLastSlot}
-              onHome={(p) => {
-                setHome(p);
-                if (p) setLastSlot('origin');
-              }}
-              onOrigin={setOrigin}
-              onDay={setDay}
-              onClear={() => {
-                setHome(null);
-                setOrigin(null);
-                setLastSlot('home');
+          <div id="search-panel-body" hidden={!panelOpen}>
+            <div role="tablist" className="mb-3 grid grid-cols-2 rounded-lg bg-slate-100 p-0.5 text-sm font-semibold">
+              {(
+                [
+                  ['route', '経路'],
+                  ['last', '終電'],
+                ] as const
+              ).map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  role="tab"
+                  aria-selected={mode === value}
+                  className={`rounded-md py-1.5 ${mode === value ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}
+                  onClick={() => setMode(value)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            {isLast ? (
+              <LastTrainSearch
+                home={home}
+                origin={origin}
+                day={day}
+                slot={lastSlot}
+                onSlot={setLastSlot}
+                onHome={(p) => {
+                  setHome(p);
+                  if (p) setLastSlot('origin');
+                }}
+                onOrigin={setOrigin}
+                onDay={setDay}
+                onClear={() => {
+                  setHome(null);
+                  setOrigin(null);
+                  setLastSlot('home');
+                }}
+              />
+            ) : (
+              <RouteSearch
+                from={from}
+                to={to}
+                slot={slot}
+                onSlot={setSlot}
+                onFrom={(p) => {
+                  setFrom(p);
+                  if (p) setSlot('to');
+                }}
+                onTo={(p) => {
+                  setTo(p);
+                  if (p) setSlot('from');
+                }}
+                onSwap={() => {
+                  setFrom(to);
+                  setTo(from);
+                }}
+                onClear={() => {
+                  setFrom(null);
+                  setTo(null);
+                  setSlot('from');
+                }}
+              />
+            )}
+            <LineSelect
+              value={focusRailway}
+              onChange={(id) => {
+                setFocusRailway(id);
+                // スマホではパネルが路線を隠すので、選んだら閉じる
+                if (id && window.innerWidth < 768) setPanelOpen(false);
               }}
             />
-          ) : (
-            <RouteSearch
-              from={from}
-              to={to}
-              slot={slot}
-              onSlot={setSlot}
-              onFrom={(p) => {
-                setFrom(p);
-                if (p) setSlot('to');
-              }}
-              onTo={(p) => {
-                setTo(p);
-                if (p) setSlot('from');
-              }}
-              onSwap={() => {
-                setFrom(to);
-                setTo(from);
-              }}
-              onClear={() => {
-                setFrom(null);
-                setTo(null);
-                setSlot('from');
-              }}
-            />
-          )}
+          </div>
         </section>
-        {!isLast && from && to && (
+        {panelOpen && !isLast && from && to && (
           <section className="panel pointer-events-auto max-h-[40vh] w-full overflow-auto rounded-2xl bg-white/95 p-4 backdrop-blur md:max-h-none md:w-80">
             <RouteResult route={route} from={from} to={to} />
           </section>
         )}
-        {isLast && home && (
+        {panelOpen && isLast && home && (
           <section className="panel pointer-events-auto max-h-[40vh] w-full overflow-auto rounded-2xl bg-white/95 p-4 backdrop-blur md:max-h-[calc(100vh-26rem)] md:w-80">
             {timetable.status === 'loading' && <p className="text-sm text-slate-500">時刻表を読み込んでいます…</p>}
             {timetable.status === 'error' && <p className="text-sm text-red-700">{timetable.message}</p>}
