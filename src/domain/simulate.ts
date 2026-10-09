@@ -356,3 +356,94 @@ export function journeyCandidates(
 
   return list.sort((a, b) => a.journey.arr - b.journey.arr || a.journey.dep - b.journey.dep).slice(0, max);
 }
+
+/** 到着時刻を指定して探すとき、出発時刻をさかのぼる幅（分） */
+const ARRIVAL_WINDOW = 240;
+
+/**
+ * 到着時刻 arriveBy までに着く行き方のうち、出発が最も遅いもの。
+ * earliestJourney は出発時刻を遅くするほど到着も遅くなる（単調）ので、出発時刻を二分探索する。
+ */
+export function latestJourney(
+  c: Connections,
+  footpaths: Footpaths,
+  fromStations: string[],
+  toStations: string[],
+  arriveBy: number,
+  options: SearchOptions = {},
+): SimJourney | null {
+  const search = (at: number) => earliestJourney(c, footpaths, fromStations, toStations, at, options);
+  const ok = (j: SimJourney | null): j is SimJourney => j !== null && j.arr <= arriveBy;
+  let lo = arriveBy - ARRIVAL_WINDOW;
+  let hi = Math.floor(arriveBy);
+  let found = search(lo);
+  if (!ok(found)) return null;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    const j = search(mid);
+    if (ok(j)) {
+      lo = mid;
+      found = j;
+    } else hi = mid - 1;
+  }
+  // 出発時刻の指定ではなく、実際に乗る時刻を起点にする
+  return { ...found, start: found.dep };
+}
+
+export type ArrivalLabel = '間に合う最終' | '1本前' | '乗換が少ない' | '別ルート';
+
+/**
+ * 到着時刻を指定したときの行き方の候補。締切に間に合う最終の行き方に加えて、1 本前・乗換の少ない行き方・
+ * 別ルートを集める。同じ行き方は 1 つにまとめ、出発の遅い順に並べる。
+ */
+export function arrivalCandidates(
+  c: Connections,
+  footpaths: Footpaths,
+  fromStations: string[],
+  toStations: string[],
+  arriveBy: number,
+  railwayOf: (stationId: string) => string,
+  max = 6,
+): { journey: SimJourney; labels: ArrivalLabel[] }[] {
+  const search = (deadline: number, options?: SearchOptions) =>
+    latestJourney(c, footpaths, fromStations, toStations, deadline, options);
+  const last = search(arriveBy);
+  if (!last) return [];
+  const list: { journey: SimJourney; labels: ArrivalLabel[] }[] = [];
+  const add = (j: SimJourney | null, label: ArrivalLabel) => {
+    if (!j) return false;
+    const sig = signature(j);
+    const found = list.find((x) => signature(x.journey) === sig);
+    if (found) {
+      if (!found.labels.includes(label)) found.labels.push(label);
+      return false;
+    }
+    list.push({ journey: j, labels: [label] });
+    return true;
+  };
+  add(last, '間に合う最終');
+
+  // 1 本前（締切から 60 分以内に着くものを 2 本まで）
+  let deadline = last.arr - 1;
+  for (let i = 0; i < 2; i++) {
+    const j = search(deadline);
+    if (!j || j.arr < arriveBy - 60) break;
+    add(j, '1本前');
+    deadline = j.arr - 1;
+  }
+
+  const fewer = search(arriveBy, { transferPenalty: 20 });
+  if (fewer && ridesOf(fewer).length < ridesOf(last).length) add(fewer, '乗換が少ない');
+
+  const railways = [...new Set(ridesOf(last).flatMap((r) => r.hops.map((h) => railwayOf(h.from))))];
+  let alternatives = 0;
+  for (const railway of railways) {
+    if (alternatives >= 2) break;
+    const j = search(arriveBy, { skip: (k) => railwayOf(c.stations[c.from[k]!]!) === railway });
+    // 最終より極端に早く出ないといけない行き方は候補にしない
+    if (j && j.dep >= last.dep - 45 && add(j, '別ルート')) alternatives++;
+  }
+
+  // 到着指定では、ゆっくり出られる（出発が遅い）順。同じ出発なら早く着く方を先に
+  return list.sort((a, b) => b.journey.dep - a.journey.dep || a.journey.arr - b.journey.arr).slice(0, max);
+}
