@@ -211,6 +211,7 @@ export default function App() {
         )}
       </div>
       <p className="pointer-events-none absolute right-2 bottom-1 text-[10px] text-slate-400">
+        <span className="hidden md:inline">地下の路線は深さを強調して描いています（深さは目安）・</span>
         データ: Mini Tokyo 3D / 公共交通オープンデータセンター
       </p>
     </main>
