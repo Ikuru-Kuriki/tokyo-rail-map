@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import DeckGL from '@deck.gl/react';
 import { FlyToInterpolator, MapView, WebMercatorViewport, type MapViewState } from '@deck.gl/core';
-import { network, placeByStation, railwayById, railwaySymbol, stationById } from '../data';
+import { network, placeById, placeByStation, railwayById, railwaySymbol, stationById } from '../data';
 import { StationCode } from '../components/StationCode';
 import type { Route } from '../domain/route';
 import type { Place } from '../domain/types';
@@ -189,10 +189,17 @@ export function RailMap({
         {labels.map((l) => {
           const active = endpointIds.has(l.id);
           return (
-            <div
+            // 駅名ラベルをクリックしても、駅の点と同じように駅を選べる
+            <button
+              type="button"
               key={l.id}
-              className={`station-label absolute flex items-center justify-center gap-1 rounded-lg px-1.5 ${active ? 'bg-slate-900 text-white' : 'bg-white text-slate-900'} ${l.dim ? 'opacity-40' : ''}`}
+              aria-label={`${l.ja}駅を選ぶ`}
+              className={`station-label pointer-events-auto absolute flex cursor-pointer items-center justify-center gap-1 rounded-lg px-1.5 transition-transform hover:-translate-y-0.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900 ${active ? 'bg-slate-900 text-white' : 'bg-white text-slate-900 hover:bg-slate-50'} ${l.dim ? 'opacity-40 hover:opacity-80' : ''}`}
               style={{ left: l.left, top: l.top, width: l.width, height: l.height }}
+              onClick={() => {
+                const place = placeById.get(l.id);
+                if (place) onPick(place);
+              }}
             >
               {l.codes?.map((c) => (
                 <StationCode key={c.code} code={c.code} color={c.color} />
@@ -212,7 +219,7 @@ export function RailMap({
                   {l.en}
                 </span>
               </span>
-            </div>
+            </button>
           );
         })}
         {lineBadges.map((b) => (
