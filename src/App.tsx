@@ -107,12 +107,13 @@ export default function App() {
   const onPick = useCallback(
     (p: Place) => {
       if (mode === 'route') {
-        if (slot === 'from') {
+        // 出発が未入力か、出発の欄を選んでいるときは出発に入れる。
+        // それ以外（出発・到着とも入れた後も含む）は到着を入れ替える
+        if (slot === 'from' || !from) {
           setFrom(p);
           setSlot('to');
         } else {
           setTo(p);
-          setSlot('from');
         }
       } else if (lastSlot === 'home' && !home) {
         setHome(p);
@@ -123,7 +124,7 @@ export default function App() {
         setOrigin(p);
       }
     },
-    [mode, slot, lastSlot, home],
+    [mode, slot, from, lastSlot, home],
   );
 
   const isLast = mode === 'last';
@@ -213,8 +214,8 @@ export default function App() {
                   if (p) setSlot('to');
                 }}
                 onTo={(p) => {
+                  // 到着を入れた後も到着の欄のままにする（次に地図で選んだ駅で到着を入れ替えられる）
                   setTo(p);
-                  if (p) setSlot('from');
                 }}
                 onSwap={() => {
                   setFrom(to);

@@ -20,4 +20,9 @@ describe('depthScale', () => {
     expect(elevationOf(0, s)).toBeLessThan(s.metersPerPixel * 2);
     expect(elevationOf(30, s)).toBeCloseTo(-30 * s.exaggeration, 5);
   });
+
+  it('真上から見るときは深さを付けない（地下の路線も地面の高さ）', () => {
+    expect(depthScale(11, 900, 0).exaggeration).toBe(0);
+    expect(depthScale(11, 900, 20).exaggeration).toBeLessThan(depthScale(11, 900, 52).exaggeration);
+  });
 });

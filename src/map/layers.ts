@@ -1,9 +1,10 @@
 import { LineLayer, PathLayer, ScatterplotLayer, SolidPolygonLayer } from '@deck.gl/layers';
 import type { Layer, PickingInfo } from '@deck.gl/core';
-import { network, placeByStation, stationById } from '../data';
+import { network, placeByStation, railwayById, stationById } from '../data';
 import type { Route } from '../domain/route';
 import type { Place, Railway, Station } from '../domain/types';
 import { gridFrame, gridLines } from './grid';
+import { interchangeLinks } from './interchange';
 import { BACKGROUND, DOT_LIFT_PX, elevationOf, hexToRgb, type DepthScale } from './style';
 
 type Position3 = [number, number, number];
@@ -16,6 +17,13 @@ interface PathDatum {
 
 /** 地下の駅から地面までの縦線（立坑）。深さが一目で分かるように */
 const shafts = network.stations.filter((s) => s.depth > 0);
+/** 同じ駅で路線ごとに位置がずれている駅を、地面の上でつなぐ線（place ごと） */
+const INTERCHANGES: { place: string; path: [number, number][] }[] = network.places.flatMap((p) =>
+  interchangeLinks(p.stations.map((id) => stationById.get(id)!.coord)).map(([a, b]) => ({
+    place: p.id,
+    path: [a, b],
+  })),
+);
 const GRID = gridLines();
 const FRAME = gridFrame();
 const GROUND = [FRAME.map(([lon, lat]) => [lon, lat, 0] as Position3)];
@@ -66,6 +74,7 @@ export function buildLayers({
     const s = stationById.get(id)!;
     return [s.coord[0], s.coord[1], z(s)];
   };
+  const groundZ = elevationOf(0, scale);
   const dotPosition = (s: Station): Position3 => [s.coord[0], s.coord[1], z(s) + DOT_LIFT_PX * scale.metersPerPixel];
   const railwayPaths: PathDatum[] = network.railways.map((r: Railway) => ({
     id: r.id,
@@ -199,6 +208,42 @@ export function buildLayers({
       getWidth: 1.5,
       widthUnits: 'pixels',
       parameters: { depthWriteEnabled: false },
+    }),
+    // 乗換駅のつながり（白い帯に濃い縁）。地面の高さに描き、地下のホームとは立坑でつながる
+    new PathLayer<{ place: string; path: [number, number][] }>({
+      id: 'interchange-outline',
+      data: INTERCHANGES,
+      getPath: (d) => d.path.map(([lon, lat]) => [lon, lat, groundZ] as Position3),
+      getColor: [70, 64, 56, highlighting || focusing ? 90 : 200],
+      getWidth: 9,
+      widthUnits: 'pixels',
+      capRounded: true,
+      billboard: true,
+      parameters: { depthCompare: 'always' },
+      updateTriggers: { getPath: scale, getColor: [highlighting, focusing] },
+    }),
+    new PathLayer<{ place: string; path: [number, number][] }>({
+      id: 'interchange',
+      data: INTERCHANGES,
+      getPath: (d) => d.path.map(([lon, lat]) => [lon, lat, groundZ] as Position3),
+      getColor: [255, 255, 255, highlighting || focusing ? 150 : 255],
+      getWidth: 6,
+      widthUnits: 'pixels',
+      capRounded: true,
+      billboard: true,
+      parameters: { depthCompare: 'always' },
+      updateTriggers: { getPath: scale, getColor: [highlighting, focusing] },
+    }),
+    // 強調中の路線の立坑は路線の色で、地面より手前に描く（地下の路線と地上の駅名のつながりが分かるように）
+    new LineLayer<Station>({
+      id: 'focus-shafts',
+      data: focusing ? shafts.filter((s) => focusSet.has(s.railway)) : [],
+      getSourcePosition: (s) => [s.coord[0], s.coord[1], z(s)],
+      getTargetPosition: (s) => [s.coord[0], s.coord[1], 0],
+      getColor: (s) => [...hexToRgb(railwayById.get(s.railway)!.color), 170],
+      getWidth: 1.5,
+      parameters: { depthCompare: 'always' },
+      updateTriggers: { getSourcePosition: scale, getTargetPosition: scale },
     }),
     new PathLayer<PathDatum>({
       id: 'route',
