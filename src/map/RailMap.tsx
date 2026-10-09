@@ -8,7 +8,7 @@ import type { Place } from '../domain/types';
 import { buildLayers } from './layers';
 import { placeLabels, type LabelCandidate } from './labels';
 import { sideViewFor } from './camera';
-import { BACKGROUND, depthExaggeration } from './style';
+import { BACKGROUND, depthScale } from './style';
 
 const INITIAL_VIEW: MapViewState = {
   longitude: 139.7,
@@ -17,7 +17,7 @@ const INITIAL_VIEW: MapViewState = {
   pitch: 52,
   bearing: -8,
   minZoom: 7.5,
-  maxZoom: 14,
+  maxZoom: 17,
   maxPitch: 85,
 };
 
@@ -72,7 +72,7 @@ export function RailMap({
       .filter((r) => focusRailways.includes(r.id))
       .flatMap((r) => r.stations.map((id) => stationById.get(id)!.coord));
     if (coords.length === 0) return;
-    const view = sideViewFor(coords, width >= 768 ? width - 360 : width - 32);
+    const view = sideViewFor(coords, width >= 768 ? width - 360 : width - 32, width >= 768 ? 170 : 0);
     setViewState((v) => ({ ...v, ...view, transitionDuration: 1200, transitionInterpolator: new FlyToInterpolator() }));
   }, [focusRailways, width]);
 
@@ -110,10 +110,10 @@ export function RailMap({
   // 深さの強調倍率はズーム 0.25 刻みで変える（毎フレーム作り直さないように）
   const zoomStep = Math.round(viewState.zoom * 4) / 4;
   const viewportSize = Math.min(width, height) || 900;
-  const exaggeration = useMemo(() => depthExaggeration(zoomStep, viewportSize), [zoomStep, viewportSize]);
+  const scale = useMemo(() => depthScale(zoomStep, viewportSize), [zoomStep, viewportSize]);
   const layers = useMemo(
-    () => buildLayers({ route, endpoints, stationColors, focusRailways, onPick, onPickRailway, exaggeration }),
-    [route, endpoints, stationColors, focusRailways, onPick, onPickRailway, exaggeration],
+    () => buildLayers({ route, endpoints, stationColors, focusRailways, onPick, onPickRailway, scale }),
+    [route, endpoints, stationColors, focusRailways, onPick, onPickRailway, scale],
   );
   const endpointIds = useMemo(() => new Set(endpoints.map((p) => p.id)), [endpoints]);
 

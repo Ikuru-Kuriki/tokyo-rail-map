@@ -58,4 +58,15 @@ describe('sideViewFor', () => {
     expect(v.bearing).toBeCloseTo(0, 1);
     expect(v.latitude).toBeCloseTo(35.61, 5);
   });
+
+  it('shiftPx を指定すると、路線が右に来るよう中心を左（西）へずらす', () => {
+    const coords: [number, number][] = [
+      [139.5, 35.68],
+      [139.7, 35.68],
+    ];
+    const plain = sideViewFor(coords, 1000);
+    const shifted = sideViewFor(coords, 1000, 200);
+    expect(shifted.longitude).toBeLessThan(plain.longitude);
+    expect(shifted.latitude).toBeCloseTo(plain.latitude, 6);
+  });
 });
