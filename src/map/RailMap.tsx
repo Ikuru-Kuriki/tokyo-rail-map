@@ -110,7 +110,8 @@ export function RailMap({
   // 深さの強調倍率はズーム 0.25 刻みで変える（毎フレーム作り直さないように）
   const zoomStep = Math.round(viewState.zoom * 4) / 4;
   const viewportSize = Math.min(width, height) || 900;
-  const scale = useMemo(() => depthScale(zoomStep, viewportSize), [zoomStep, viewportSize]);
+  const pitchStep = Math.round(viewState.pitch ?? 0);
+  const scale = useMemo(() => depthScale(zoomStep, viewportSize, pitchStep), [zoomStep, viewportSize, pitchStep]);
   const layers = useMemo(
     () => buildLayers({ route, endpoints, stationColors, focusRailways, onPick, onPickRailway, scale }),
     [route, endpoints, stationColors, focusRailways, onPick, onPickRailway, scale],

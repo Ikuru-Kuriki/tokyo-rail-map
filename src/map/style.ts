@@ -18,15 +18,18 @@ export interface DepthScale {
 
 /**
  * 今のズームでの尺度。1 ピクセルあたりのメートル数 ≒ 地球の円周 × cos(緯度) / (512 × 2^zoom)（deck.gl の MapView）。
- * 深さはズームによらずほぼ同じピクセル数に見せるが、拡大したとき（ズーム 12 より先）は駅から離れすぎないように弱める
+ * 深さはズームによらずほぼ同じピクセル数に見せるが、拡大したとき（ズーム 12 より先）は駅から離れすぎないように弱める。
+ * また傾きが小さい（真上から見る）ほど弱める
  */
-export function depthScale(zoom: number, viewportSize = 900, latitude = 35.68): DepthScale {
+export function depthScale(zoom: number, viewportSize = 900, pitch = 52, latitude = 35.68): DepthScale {
   const metersPerPixel = (40075016.686 * Math.cos((latitude * Math.PI) / 180)) / (512 * 2 ** zoom);
   // 小さい画面（スマホ）では同じ深さでも画面に対して大きくなりすぎるので、画面の短い辺に合わせて弱める
   const screenFactor = Math.min(1, viewportSize / 900);
   const zoomFactor = Math.min(1, Math.max(0.3, 1 - (zoom - 12) * 0.15));
+  // 深さは傾けたときにだけ見える。真上に近いほど弱め、真上（0 度）では地下の路線も地面の高さに描く
+  const pitchFactor = Math.min(1, Math.max(0, pitch / 45));
   return {
-    exaggeration: Math.max(0.5, metersPerPixel * DEPTH_PIXELS_PER_METER * screenFactor * zoomFactor),
+    exaggeration: metersPerPixel * DEPTH_PIXELS_PER_METER * screenFactor * zoomFactor * pitchFactor,
     metersPerPixel,
   };
 }
