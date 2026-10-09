@@ -32,6 +32,14 @@ export interface SimJourney {
   legs: SimLeg[];
 }
 
+/** 行き方を探すときの条件 */
+export interface SearchOptions {
+  /** 別の列車に乗り換えるたびに余分にかかるとみなす分（乗換の少ない行き方を探すとき） */
+  transferPenalty?: number;
+  /** 使わない区間（connections の添字）。別の路線の行き方を探すとき */
+  skip?: (k: number) => boolean;
+}
+
 type Step = { kind: 'ride'; enter: number; exit: number } | { kind: 'walk'; from: number; minutes: number };
 
 /**
@@ -44,7 +52,9 @@ export function earliestJourney(
   fromStations: string[],
   toStations: string[],
   departAt: number,
+  options: SearchOptions = {},
 ): SimJourney | null {
+  const penalty = options.transferPenalty ?? 0;
   const n = c.stations.length;
   const index = new Map(c.stations.map((id, i) => [id, i]));
   const foot: [number, number][][] = Array.from({ length: n }, () => []);
@@ -85,6 +95,11 @@ export function earliestJourney(
     if (dep < departAt) continue;
     if (dep > best) break;
     const trip = c.trip[k]!;
+    if (options.skip?.(k)) {
+      // 使わない区間。その列車にはここから先も乗り続けられない
+      enterOf.delete(trip);
+      continue;
+    }
     const u = c.from[k]!;
     if (!enterOf.has(trip)) {
       if (ready[u]! > dep) continue;
@@ -94,13 +109,13 @@ export function earliestJourney(
     const arr = c.arr[k]!;
     if (arr < arrival[v]!) {
       arrival[v] = arr;
-      ready[v] = arr + CHANGE_MINUTES;
+      ready[v] = arr + CHANGE_MINUTES + penalty;
       step[v] = { kind: 'ride', enter: enterOf.get(trip)!, exit: k };
       if (targets.has(v)) best = Math.min(best, arr);
       for (const [w, minutes] of foot[v]!) {
         if (arr + minutes < arrival[w]!) {
           arrival[w] = arr + minutes;
-          ready[w] = arr + minutes + CHANGE_MINUTES;
+          ready[w] = arr + minutes + CHANGE_MINUTES + penalty;
           step[w] = { kind: 'walk', from: v, minutes };
           if (targets.has(w)) best = Math.min(best, arr + minutes);
         }
@@ -213,7 +228,8 @@ export function positionAt(j: SimJourney, t: number, g: Geometry): SimPosition {
     if (leg.kind === 'walk') {
       if (t <= leg.arr) {
         const p = along([leg.from, leg.to], leg.arr === leg.dep ? 1 : (t - leg.dep) / (leg.arr - leg.dep), g);
-        return { ...p, phase: 'transfer', status: `${g.name(leg.from)}で乗換（${g.name(leg.to)}へ歩いて移動）` };
+        const where = g.name(leg.from) === g.name(leg.to) ? `${g.railwayName(leg.to)}のホーム` : `${g.name(leg.to)}駅`;
+        return { ...p, phase: 'transfer', status: `${g.name(leg.from)}で乗換（${where}へ移動中）` };
       }
       continue;
     }
@@ -225,7 +241,11 @@ export function positionAt(j: SimJourney, t: number, g: Geometry): SimPosition {
       return at(firstHop.from, 'transfer', `${g.name(firstHop.from)}で乗換（${hhmm(firstHop.dep)} 発を待つ）`);
     for (const h of leg.hops) {
       if (t < h.dep)
-        return at(h.from, 'stopped', `${g.railwayName(h.from)} ${leg.destination ? `${leg.destination}行 ` : ''}・ ${g.name(h.from)}に停車中`);
+        return at(
+          h.from,
+          'stopped',
+          `${g.railwayName(h.from)} ${leg.destination ? `${leg.destination}行 ` : ''}・ ${g.name(h.from)}に停車中`,
+        );
       if (t <= h.arr) {
         const p = along(g.path(h.from, h.to), h.arr === h.dep ? 1 : (t - h.dep) / (h.arr - h.dep), g);
         return {
@@ -258,4 +278,81 @@ export function toStopsJourney(j: SimJourney): LastTrainJourney {
         : { kind: 'walk' as const, from: l.from, to: l.to, minutes: l.arr - l.dep },
     ),
   };
+}
+
+export type CandidateLabel = '最速' | '次の電車' | '乗換が少ない' | '別ルート';
+
+export interface JourneyCandidate {
+  journey: SimJourney;
+  labels: CandidateLabel[];
+}
+
+const ridesOf = (j: SimJourney) => j.legs.filter((l): l is Extract<SimLeg, { kind: 'ride' }> => l.kind === 'ride');
+
+/** 同じ行き方か（乗る列車と乗る時刻の並びが同じ） */
+const signature = (j: SimJourney) =>
+  ridesOf(j)
+    .map((r) => `${r.trip}@${r.hops[0]!.dep}`)
+    .join('|');
+
+/**
+ * 行き方の候補。最速の行き方に加えて、次の電車・乗換の少ない行き方・最速で使う路線を避けた行き方を集める。
+ * 同じ行き方は 1 つにまとめ、到着の早い順に並べる。railwayOf は駅 ID から路線 ID を返す。
+ */
+export function journeyCandidates(
+  c: Connections,
+  footpaths: Footpaths,
+  fromStations: string[],
+  toStations: string[],
+  departAt: number,
+  railwayOf: (stationId: string) => string,
+  max = 6,
+): JourneyCandidate[] {
+  const search = (at: number, options?: SearchOptions) =>
+    earliestJourney(c, footpaths, fromStations, toStations, at, options);
+  const best = search(departAt);
+  if (!best) return [];
+  const list: JourneyCandidate[] = [];
+  const add = (j: SimJourney | null, label: CandidateLabel) => {
+    if (!j) return false;
+    const sig = signature(j);
+    const found = list.find((x) => signature(x.journey) === sig);
+    if (found) {
+      if (!found.labels.includes(label)) found.labels.push(label);
+      return false;
+    }
+    list.push({ journey: j, labels: [label] });
+    return true;
+  };
+  add(best, '最速');
+
+  // 次の電車（出発から 60 分以内に出るものを 3 本まで）
+  let at = best.dep + 1;
+  // 探す回数にも上限を付ける（同じ最後の列車ばかりのときに探し続けないように）
+  for (let i = 0, tries = 0; i < 3 && tries < 8; i++, tries++) {
+    const j = search(at);
+    if (!j || j.dep > departAt + 60) break;
+    // 結局同じ最後の列車に乗るだけの行き方（途中で待つだけ）は候補にしない
+    const lastTrip = (x: SimJourney) => ridesOf(x).at(-1)!.trip;
+    if (!list.some((x) => lastTrip(x.journey) === lastTrip(j))) add(j, '次の電車');
+    else i--;
+    at = j.dep + 1;
+    if (at > departAt + 60) break;
+  }
+
+  // 乗換の少ない行き方（乗換 1 回を 20 分の遅れとみなす）
+  const fewer = search(departAt, { transferPenalty: 20 });
+  if (fewer && ridesOf(fewer).length < ridesOf(best).length) add(fewer, '乗換が少ない');
+
+  // 別ルート: 最速の行き方で使う路線を 1 つずつ避ける（新しい行き方は 2 つまで）
+  const railways = [...new Set(ridesOf(best).flatMap((r) => r.hops.map((h) => railwayOf(h.from))))];
+  let alternatives = 0;
+  for (const railway of railways) {
+    if (alternatives >= 2) break;
+    const j = search(departAt, { skip: (k) => railwayOf(c.stations[c.from[k]!]!) === railway });
+    // 最速より極端に遅い行き方は候補にしない
+    if (j && j.arr <= best.arr + 45 && add(j, '別ルート')) alternatives++;
+  }
+
+  return list.sort((a, b) => a.journey.arr - b.journey.arr || a.journey.dep - b.journey.dep).slice(0, max);
 }

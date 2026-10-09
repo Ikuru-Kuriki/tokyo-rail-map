@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import { network } from '.';
+import { network, stationById } from '.';
 import { buildFootpaths } from '../domain/lastTrain';
-import { earliestJourney, type SimJourney } from '../domain/simulate';
+import { journeyCandidates, type JourneyCandidate } from '../domain/simulate';
 import { startMinutes, type SimRouteInput } from '../domain/simRoutes';
 import type { DayType } from '../domain/timetableTypes';
 import { loadConnections } from './dayTimetable';
@@ -12,9 +12,11 @@ export type SimulationState =
   | { status: 'idle' }
   | { status: 'loading' }
   | { status: 'error'; message: string }
-  | { status: 'ready'; journeys: (SimJourney | null)[]; starts: (number | null)[] };
+  | { status: 'ready'; candidates: JourneyCandidate[][]; starts: (number | null)[] };
 
-/** 各経路の行程を時刻表から求める（出発・到着がそろった経路だけ） */
+const railwayOf = (id: string) => stationById.get(id)?.railway ?? '';
+
+/** 各経路の行き方の候補を時刻表から求める（出発・到着がそろった経路だけ。先頭が最速） */
 export function useSimulation(day: DayType, routes: SimRouteInput[], baseTime: string): SimulationState {
   const [state, setState] = useState<SimulationState>({ status: 'idle' });
   const key = JSON.stringify([day, baseTime, routes.map((r) => [r.from?.id, r.to?.id, r.mode, r.offset, r.time])]);
@@ -35,10 +37,10 @@ export function useSimulation(day: DayType, routes: SimRouteInput[], baseTime: s
     loadConnections(day, first, Math.ceil((last - first) / 60) + 4).then(
       (conns) => {
         if (!alive) return;
-        const journeys = routes.map((r, i) =>
-          usable[i] ? earliestJourney(conns, footpaths, r.from!.stations, r.to!.stations, starts[i]!) : null,
+        const candidates = routes.map((r, i) =>
+          usable[i] ? journeyCandidates(conns, footpaths, r.from!.stations, r.to!.stations, starts[i]!, railwayOf) : [],
         );
-        setState({ status: 'ready', journeys, starts });
+        setState({ status: 'ready', candidates, starts });
       },
       (e: unknown) => alive && setState({ status: 'error', message: e instanceof Error ? e.message : String(e) }),
     );

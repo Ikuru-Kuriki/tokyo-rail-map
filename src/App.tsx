@@ -139,7 +139,13 @@ export default function App() {
   const [simTime, setSimTime] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(60);
-  const simJourneys = useMemo(() => (sim.status === 'ready' ? sim.journeys : []), [sim]);
+  /** 経路ごとに選んだ行き方（候補の番号）。結果が変わったら最速（0）に戻す */
+  const [simChoice, setSimChoice] = useState<number[]>([]);
+  useEffect(() => setSimChoice([]), [sim]);
+  const simJourneys = useMemo(
+    () => (sim.status === 'ready' ? sim.candidates.map((list, i) => list[simChoice[i] ?? 0]?.journey ?? null) : []),
+    [sim, simChoice],
+  );
   /** 再生する時刻の範囲（最初の出発〜最後の到着の少し後） */
   const simRange = useMemo((): [number, number] | null => {
     const js = simJourneys.filter((j) => j !== null);
@@ -306,6 +312,14 @@ export default function App() {
                 day={day}
                 slot={simSlot}
                 state={sim}
+                choice={simChoice}
+                onChoose={(route, index) =>
+                  setSimChoice((cur) => {
+                    const next = [...cur];
+                    next[route] = index;
+                    return next;
+                  })
+                }
                 onSlot={setSimSlot}
                 onChange={(i, patch) => {
                   updateSimRoute(i, patch);

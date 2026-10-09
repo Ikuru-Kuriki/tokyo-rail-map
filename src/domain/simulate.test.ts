@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { earliestJourney, positionAt, type Connections, type Geometry } from './simulate';
+import { earliestJourney, journeyCandidates, positionAt, type Connections, type Geometry } from './simulate';
 import type { Footpaths } from './lastTrain';
 
 const t = (hhmm: string) => {
@@ -119,5 +119,59 @@ describe('positionAt', () => {
     const loop = conns([{ from: 'A1', to: 'A2', dep: '8:00', arr: '8:10', trip: 0 }], ['']);
     const lj = earliestJourney(loop, noFoot, ['A1'], ['A2'], t('7:50'))!;
     expect(positionAt(lj, t('8:05'), g).status).not.toContain('行');
+  });
+});
+
+describe('journeyCandidates', () => {
+  // A 線: A1 → X → A3、B 線: X → B2、C 線: A1 → B2（直通・遅い）
+  const railwayOf = (id: string) => id.replace(/\d$/, '').replace('X', 'A');
+  const c = conns(
+    [
+      { from: 'A1', to: 'X', dep: '8:00', arr: '8:10', trip: 0 },
+      { from: 'X', to: 'B2', dep: '8:13', arr: '8:20', trip: 1 },
+      { from: 'A1', to: 'X', dep: '8:10', arr: '8:20', trip: 2 },
+      { from: 'X', to: 'B2', dep: '8:23', arr: '8:30', trip: 3 },
+      { from: 'C1', to: 'C2', dep: '8:00', arr: '8:01', trip: 9 },
+    ],
+    [],
+  );
+  // C 線は A1 から B2 へ乗換なしで行ける（A1 と C1、B2 と C2 は同じ構内）
+  const c2 = conns([
+    { from: 'A1', to: 'X', dep: '8:00', arr: '8:10', trip: 0 },
+    { from: 'X', to: 'B2', dep: '8:13', arr: '8:20', trip: 1 },
+    { from: 'A1', to: 'B2', dep: '8:02', arr: '8:25', trip: 5 },
+  ]);
+
+  it('最速を先頭に、次の電車も候補に入れる', () => {
+    const list = journeyCandidates(c, noFoot, ['A1'], ['B2'], t('7:55'), railwayOf);
+    expect(list[0]!.labels).toContain('最速');
+    expect(list[0]!.journey.arr).toBe(t('8:20'));
+    expect(list.some((x) => x.labels.includes('次の電車') && x.journey.arr === t('8:30'))).toBe(true);
+  });
+
+  it('乗換の少ない行き方を候補に入れる', () => {
+    const list = journeyCandidates(c2, noFoot, ['A1'], ['B2'], t('7:55'), () => 'L');
+    const fewer = list.find((x) => x.labels.includes('乗換が少ない'))!;
+    expect(fewer.journey.legs.filter((l) => l.kind === 'ride')).toHaveLength(1);
+    expect(fewer.journey.arr).toBe(t('8:25'));
+  });
+
+  it('同じ行き方は 1 つにまとめる', () => {
+    const list = journeyCandidates(c2, noFoot, ['A1'], ['B2'], t('7:55'), (id) => (id === 'X' ? 'B' : id));
+    const sigs = list.map((x) => x.journey.legs.map((l) => (l.kind === 'ride' ? l.trip : 'w')).join());
+    expect(new Set(sigs).size).toBe(sigs.length);
+  });
+});
+
+describe('earliestJourney の条件', () => {
+  it('skip した区間は使わず、その列車にも乗り続けない', () => {
+    const c = conns([
+      { from: 'A1', to: 'A2', dep: '8:00', arr: '8:05', trip: 0 },
+      { from: 'A2', to: 'A3', dep: '8:06', arr: '8:10', trip: 0 },
+      { from: 'A1', to: 'A3', dep: '8:01', arr: '8:20', trip: 1 },
+    ]);
+    const skipFirst = (k: number) => c.trip[k] === 0 && c.from[k] === c.stations.indexOf('A1');
+    const j = earliestJourney(c, noFoot, ['A1'], ['A3'], t('7:59'), { skip: skipFirst })!;
+    expect(j.arr).toBe(t('8:20'));
   });
 });
