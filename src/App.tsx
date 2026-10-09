@@ -20,7 +20,7 @@ import { MAX_SIM_ROUTES, SimulationPanel, type SimSlot } from './components/Simu
 import { PlaybackBar } from './components/PlaybackBar';
 import { nowClock } from './domain/clock';
 import { stationsBetween } from './domain/journeyRoute';
-import { positionAt, toStopsJourney, type Geometry } from './domain/simulate';
+import { positionAt, toStopsJourney, type Geometry, type SimJourney } from './domain/simulate';
 import type { SimRouteInput, TimeKind } from './domain/simRoutes';
 import type { Route } from './domain/route';
 import type { TrainMarker } from './map/layers';
@@ -143,9 +143,15 @@ export default function App() {
   /** 経路ごとに選んだ行き方（候補の番号）。結果が変わったら最速（0）に戻す */
   const [simChoice, setSimChoice] = useState<number[]>([]);
   useEffect(() => setSimChoice([]), [sim]);
+  /** 区間ごとに列車を選び直した行き方（経路ごと）。候補を選び直すか結果が変わったら消す */
+  const [simCustom, setSimCustom] = useState<(SimJourney | null)[]>([]);
+  useEffect(() => setSimCustom([]), [sim, simChoice]);
   const simJourneys = useMemo(
-    () => (sim.status === 'ready' ? sim.candidates.map((list, i) => list[simChoice[i] ?? 0]?.journey ?? null) : []),
-    [sim, simChoice],
+    () =>
+      sim.status === 'ready'
+        ? sim.candidates.map((list, i) => simCustom[i] ?? list[simChoice[i] ?? 0]?.journey ?? null)
+        : [],
+    [sim, simChoice, simCustom],
   );
   /** 再生する時刻の範囲（最初の出発〜最後の到着の少し後） */
   const simRange = useMemo((): [number, number] | null => {
@@ -183,6 +189,21 @@ export default function App() {
       lastFrame.current = null;
     };
   }, [playing, simRange, speed, mode]);
+  // スペースキーで再生・一時停止（入力欄で文字を打っているときは除く）
+  useEffect(() => {
+    if (mode !== 'sim' || !simRange) return;
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (e.code !== 'Space' || target?.closest('input, select, textarea, button')) return;
+      e.preventDefault();
+      setPlaying((p) => {
+        if (!p && simTime >= simRange[1]) setSimTime(simRange[0]);
+        return !p;
+      });
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [mode, simRange, simTime]);
   const simPositions = useMemo(
     () => simJourneys.map((j) => (j ? positionAt(j, simTime, geometry) : null)),
     [simJourneys, simTime],
@@ -267,7 +288,7 @@ export default function App() {
       {/* スマホでは検索を上、結果を下に。PC では左上に縦に並べる */}
       <div className="pointer-events-none absolute inset-0 flex flex-col justify-between gap-3 p-3 md:justify-start md:p-4">
         <section
-          className={`panel pointer-events-auto w-full rounded-2xl bg-white/95 p-3 backdrop-blur md:w-80 md:p-4 ${isSim ? 'max-h-[45vh] overflow-y-auto md:max-h-[calc(100vh-2rem)]' : ''}`}
+          className={`panel pointer-events-auto w-full rounded-2xl bg-white/95 p-3 backdrop-blur md:p-4 ${isSim ? 'md:w-96' : 'md:w-80'} ${isSim ? 'max-h-[45vh] overflow-y-auto md:max-h-[calc(100vh-2rem)]' : ''}`}
         >
           <div className={`flex items-center gap-2 ${panelOpen ? 'mb-2 md:mb-3' : ''}`}>
             <h1 className="flex min-w-0 flex-1 items-baseline gap-2">
@@ -315,6 +336,22 @@ export default function App() {
                 slot={simSlot}
                 state={sim}
                 choice={simChoice}
+                journeys={simJourneys}
+                customized={simRoutes.map((_, i) => Boolean(simCustom[i]))}
+                onResetCustom={(route) =>
+                  setSimCustom((cur) => {
+                    const next = [...cur];
+                    next[route] = null;
+                    return next;
+                  })
+                }
+                onCustomize={(route, journey) =>
+                  setSimCustom((cur) => {
+                    const next = [...cur];
+                    next[route] = journey;
+                    return next;
+                  })
+                }
                 onChoose={(route, index) =>
                   setSimChoice((cur) => {
                     const next = [...cur];
@@ -410,7 +447,7 @@ export default function App() {
         )}
       </div>
       {isSim && simRange && (
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center p-3 md:bottom-4 md:left-[22rem] md:justify-start md:p-0">
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center p-3 md:bottom-4 md:left-[26rem] md:justify-start md:p-0">
           <PlaybackBar
             start={simRange[0]}
             end={simRange[1]}

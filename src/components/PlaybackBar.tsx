@@ -23,7 +23,7 @@ export function PlaybackBar({ start, end, time, playing, speed, rows, onTime, on
   return (
     <section
       aria-label="再生"
-      className="panel pointer-events-auto w-full rounded-2xl bg-white/95 p-3 backdrop-blur md:w-[min(640px,calc(100vw-24rem))]"
+      className="panel pointer-events-auto w-full rounded-2xl bg-white/95 p-3 backdrop-blur md:w-[min(640px,calc(100vw-28rem))]"
     >
       <div className="flex items-center gap-3">
         <button

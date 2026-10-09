@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
   arrivalCandidates,
+  earliestBoarding,
   earliestJourney,
   journeyCandidates,
   latestJourney,
   positionAt,
+  replaceRide,
+  trainsBetween,
   type Connections,
   type Geometry,
 } from './simulate';
@@ -211,5 +214,38 @@ describe('latestJourney（到着時刻を指定）', () => {
     expect(list.map((x) => x.journey.arr)).toEqual([t('8:40'), t('8:30'), t('8:20')]);
     expect(list[0]!.labels).toContain('間に合う最終');
     expect(list[1]!.labels).toContain('1本前');
+  });
+});
+
+describe('区間ごとに列車を選ぶ', () => {
+  // A 線: A1 → X、B 線: X → B2。A 線は 8:00 と 8:05 発、B 線は 8:13 と 8:30 発
+  const c = conns([
+    { from: 'A1', to: 'X', dep: '8:00', arr: '8:10', trip: 0 },
+    { from: 'A1', to: 'X', dep: '8:05', arr: '8:20', trip: 1 },
+    { from: 'X', to: 'B2', dep: '8:13', arr: '8:20', trip: 2 },
+    { from: 'X', to: 'B2', dep: '8:30', arr: '8:37', trip: 3 },
+  ]);
+
+  it('trainsBetween: 区間に乗れる列車を出発順に返す', () => {
+    const list = trainsBetween(c, ['A1'], ['X'], t('7:55'));
+    expect(list.map((x) => x.dep)).toEqual([t('8:00'), t('8:05')]);
+    expect(trainsBetween(c, ['A1'], ['X'], t('8:01')).map((x) => x.trip)).toEqual([1]);
+  });
+
+  it('replaceRide: 遅い列車に替えると、その先は乗れる電車で組み直す', () => {
+    const j = earliestJourney(c, noFoot, ['A1'], ['B2'], t('7:55'))!;
+    expect(j.arr).toBe(t('8:20'));
+    const slower = trainsBetween(c, ['A1'], ['X'], t('7:55'))[1]!;
+    const r = replaceRide(c, noFoot, j, 0, slower, ['B2'])!;
+    expect(r.dep).toBe(t('8:05'));
+    // X に 8:20 着なので 8:13 発には乗れず、8:30 発になる
+    expect(r.arr).toBe(t('8:37'));
+    expect(r.legs).toHaveLength(2);
+  });
+
+  it('earliestBoarding: 前の区間の到着＋乗換の時間', () => {
+    const j = earliestJourney(c, noFoot, ['A1'], ['B2'], t('7:55'))!;
+    expect(earliestBoarding(j, 0)).toBeNull();
+    expect(earliestBoarding(j, 1)).toBe(t('8:12'));
   });
 });

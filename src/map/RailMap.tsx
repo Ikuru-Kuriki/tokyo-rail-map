@@ -4,7 +4,7 @@ import { FlyToInterpolator, MapView, WebMercatorViewport, type MapViewState } fr
 import { network, placeById, placeByStation, railwayById, railwaySymbol, stationById } from '../data';
 import { StationCode } from '../components/StationCode';
 import type { Route } from '../domain/route';
-import type { Place } from '../domain/types';
+import type { Place, Station } from '../domain/types';
 import { buildLayers, type TrainMarker } from './layers';
 import { placeLabels, type LabelCandidate } from './labels';
 import { sideViewFor } from './camera';
@@ -24,6 +24,14 @@ const INITIAL_VIEW: MapViewState = {
 const VIEW = new MapView({ repeat: false });
 const NO_RAILWAYS: string[] = [];
 const NO_TRAINS: TrainMarker[] = [];
+const TOOLTIP_STYLE = {
+  background: 'rgba(15, 23, 42, 0.92)',
+  color: 'white',
+  fontSize: '12px',
+  fontWeight: '600',
+  padding: '4px 8px',
+  borderRadius: '6px',
+};
 
 interface Props {
   route: Route | null;
@@ -95,7 +103,7 @@ export function RailMap({
         // 左上の検索パネルを避ける（スマホでは上側）
         padding:
           width >= 768
-            ? { top: 80, bottom: 80, left: 400, right: 100 }
+            ? { top: 80, bottom: 200, left: 440, right: 100 }
             : { top: Math.min(height * 0.48, 400), bottom: Math.min(height * 0.3, 260), left: 40, right: 40 },
         maxZoom: 13,
       },
@@ -197,6 +205,22 @@ export function RailMap({
         controller={{ dragRotate: true, touchRotate: true, inertia: 300 }}
         layers={layers}
         getCursor={({ isHovering, isDragging }) => (isDragging ? 'grabbing' : isHovering ? 'pointer' : 'grab')}
+        // 駅の点・線の近くでもクリックできるように
+        pickingRadius={6}
+        // 名前の出ていない駅でも、カーソルを乗せると駅名と路線が分かる
+        getTooltip={({ object, layer }) => {
+          if (!object || !layer) return null;
+          if (layer.id === 'stations' || layer.id === 'focus-stations') {
+            const s = object as Station;
+            const code = s.code ? `${s.code} ` : '';
+            return { text: `${code}${s.ja}（${railwayById.get(s.railway)!.ja}）`, style: TOOLTIP_STYLE };
+          }
+          if (layer.id === 'railways') {
+            const r = railwayById.get((object as { id: string }).id);
+            return r ? { text: `${r.ja}（クリックで強調）`, style: TOOLTIP_STYLE } : null;
+          }
+          return null;
+        }}
       />
       <div className="pointer-events-none absolute inset-0">
         {labels.map((l) => {

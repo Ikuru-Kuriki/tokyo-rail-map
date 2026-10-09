@@ -447,3 +447,110 @@ export function arrivalCandidates(
   // 到着指定では、ゆっくり出られる（出発が遅い）順。同じ出発なら早く着く方を先に
   return list.sort((a, b) => b.journey.dep - a.journey.dep || a.journey.arr - b.journey.arr).slice(0, max);
 }
+
+/** ある区間（乗る駅→降りる駅）に乗れる列車の 1 本 */
+export interface TrainOption {
+  trip: number;
+  destination: string;
+  hops: Hop[];
+  dep: number;
+  arr: number;
+}
+
+/** trip ごとの区間の添字（時刻順）。Connections ごとに 1 回だけ作る */
+const tripIndexCache = new WeakMap<Connections, Map<number, number[]>>();
+function tripIndex(c: Connections): Map<number, number[]> {
+  let m = tripIndexCache.get(c);
+  if (!m) {
+    m = new Map();
+    for (let k = 0; k < c.trip.length; k++) {
+      const list = m.get(c.trip[k]!);
+      if (list) list.push(k);
+      else m.set(c.trip[k]!, [k]);
+    }
+    tripIndexCache.set(c, m);
+  }
+  return m;
+}
+
+/**
+ * fromStations のどれかを after 以降に出て、toStations のどれかに止まる列車を、出発の早い順に limit 本まで。
+ * 同じ駅（place）の別の路線のホームから出る列車も含める（駅の集まりで渡す）。
+ */
+export function trainsBetween(
+  c: Connections,
+  fromStations: string[],
+  toStations: string[],
+  after: number,
+  limit = 8,
+): TrainOption[] {
+  const index = new Map(c.stations.map((id, i) => [id, i]));
+  const from = new Set(fromStations.map((id) => index.get(id)).filter((i): i is number => i !== undefined));
+  const to = new Set(toStations.map((id) => index.get(id)).filter((i): i is number => i !== undefined));
+  const byTrip = tripIndex(c);
+  const seen = new Set<number>();
+  const out: TrainOption[] = [];
+  for (let k = 0; k < c.dep.length && out.length < limit; k++) {
+    if (c.dep[k]! < after || !from.has(c.from[k]!) || seen.has(c.trip[k]!)) continue;
+    const trip = c.trip[k]!;
+    const list = byTrip.get(trip)!;
+    const hops: Hop[] = [];
+    let reached = false;
+    for (let n = list.indexOf(k); n < list.length; n++) {
+      const q = list[n]!;
+      hops.push({ from: c.stations[c.from[q]!]!, to: c.stations[c.to[q]!]!, dep: c.dep[q]!, arr: c.arr[q]! });
+      if (to.has(c.to[q]!)) {
+        reached = true;
+        break;
+      }
+    }
+    if (!reached) continue;
+    seen.add(trip);
+    out.push({ trip, destination: c.tripDestination(trip), hops, dep: hops[0]!.dep, arr: hops[hops.length - 1]!.arr });
+  }
+  return out;
+}
+
+/**
+ * 行き方の legIndex 番目の乗車を train に替え、その先は降りた駅から目的地まで最も早い行き方で組み直す。
+ * それより前の区間はそのまま。目的地に着けなければ null。
+ */
+export function replaceRide(
+  c: Connections,
+  footpaths: Footpaths,
+  journey: SimJourney,
+  legIndex: number,
+  train: TrainOption,
+  toStations: string[],
+): SimJourney | null {
+  const before = journey.legs.slice(0, legIndex);
+  const ride: SimLeg = { kind: 'ride', trip: train.trip, destination: train.destination, hops: train.hops };
+  const alight = train.hops[train.hops.length - 1]!.to;
+  let rest: SimLeg[] = [];
+  let arr = train.arr;
+  if (!toStations.includes(alight)) {
+    const next = earliestJourney(c, footpaths, [alight], toStations, train.arr + CHANGE_MINUTES);
+    if (!next) {
+      // 同じ駅の別の路線のホームが目的地なら、歩くだけで着く
+      const walk = footpaths.get(alight)?.find(([to]) => toStations.includes(to));
+      if (!walk) return null;
+      rest = [{ kind: 'walk', from: alight, to: walk[0], dep: train.arr, arr: train.arr + walk[1] }];
+      arr = train.arr + walk[1];
+    } else {
+      rest = next.legs;
+      arr = next.arr;
+    }
+  }
+  const legs = [...before, ride, ...rest];
+  const firstRide = legs.find((l): l is Extract<SimLeg, { kind: 'ride' }> => l.kind === 'ride')!;
+  const dep = firstRide.hops[0]!.dep;
+  return { start: Math.min(journey.start, dep), dep, arr, legs };
+}
+
+/** legIndex 番目の乗車に乗れる、いちばん早い時刻（前の区間の到着＋乗換の時間）。最初の乗車なら null */
+export function earliestBoarding(journey: SimJourney, legIndex: number): number | null {
+  const prev = journey.legs[legIndex - 1];
+  if (!prev) return null;
+  if (prev.kind === 'walk') return prev.arr + CHANGE_MINUTES;
+  return prev.hops[prev.hops.length - 1]!.arr + CHANGE_MINUTES;
+}
