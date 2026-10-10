@@ -1,7 +1,7 @@
-import { region } from "../data";
+import { region } from '../data';
 
 /** 地図の見た目の定数（方眼紙の地面＋地下に沈む地下鉄） */
-export const BACKGROUND = "#f3f1ec";
+export const BACKGROUND = '#f3f1ec';
 /** 地下の深さ 1m を画面上で何ピクセルくらいに見せるか（引いた表示のとき） */
 export const DEPTH_PIXELS_PER_METER = 6;
 /** 「乗換を見る」で寄ったときの深さの強調（実際の深さの何倍で描くか） */
@@ -25,40 +25,27 @@ export interface DepthScale {
  * 深さはズームによらずほぼ同じピクセル数に見せるが、拡大したとき（ズーム 12 より先）は駅から離れすぎないように弱める。
  * また傾きが小さい（真上から見る）ほど弱める
  */
-export function depthScale(
-  zoom: number,
-  viewportSize = 900,
-  pitch = 52,
-  latitude = 35.68,
-): DepthScale {
-  const metersPerPixel =
-    (40075016.686 * Math.cos((latitude * Math.PI) / 180)) / (512 * 2 ** zoom);
+export function depthScale(zoom: number, viewportSize = 900, pitch = 52, latitude = 35.68): DepthScale {
+  const metersPerPixel = (40075016.686 * Math.cos((latitude * Math.PI) / 180)) / (512 * 2 ** zoom);
   // 小さい画面（スマホ）では同じ深さでも画面に対して大きくなりすぎるので、画面の短い辺に合わせて弱める
   const screenFactor = Math.min(1, viewportSize / 900);
   const zoomFactor = Math.min(1, Math.max(0.3, 1 - (zoom - 12) * 0.15));
   // 深さは傾けたときにだけ見える。真上に近いほど弱め、真上（0 度）では地下の路線も地面の高さに描く
   const pitchFactor = Math.min(1, Math.max(0, pitch / 45));
   return {
-    exaggeration:
-      metersPerPixel *
-      DEPTH_PIXELS_PER_METER *
-      screenFactor *
-      zoomFactor *
-      pitchFactor,
+    exaggeration: metersPerPixel * DEPTH_PIXELS_PER_METER * screenFactor * zoomFactor * pitchFactor,
     metersPerPixel,
   };
 }
 
 /** 駅の深さ（m）から描画の高さ（m）へ。地上の路線はほんの少しだけ浮かせる */
 export function elevationOf(depth: number, scale: DepthScale): number {
-  return depth > 0
-    ? -depth * scale.exaggeration
-    : GROUND_LIFT_PX * scale.metersPerPixel;
+  return depth > 0 ? -depth * scale.exaggeration : GROUND_LIFT_PX * scale.metersPerPixel;
 }
 
 export function hexToRgb(hex: string): [number, number, number] {
-  const h = hex.replace("#", "");
-  const full = h.length === 3 ? [...h].map((c) => c + c).join("") : h;
+  const h = hex.replace('#', '');
+  const full = h.length === 3 ? [...h].map((c) => c + c).join('') : h;
   const n = parseInt(full, 16);
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }

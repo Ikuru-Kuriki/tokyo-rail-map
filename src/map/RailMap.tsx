@@ -1,56 +1,25 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import DeckGL, { type DeckGLRef } from "@deck.gl/react";
-import {
-  FlyToInterpolator,
-  MapView,
-  WebMercatorViewport,
-  type MapViewState,
-  type PickingInfo,
-} from "@deck.gl/core";
-import {
-  network,
-  placeById,
-  placeByStation,
-  railwayById,
-  railwaySymbol,
-  region,
-  stationById,
-} from "../data";
-import { StationCode } from "../components/StationCode";
-import type { Route } from "../domain/route";
-import type { Place, Station } from "../domain/types";
-import {
-  buildHoverLayers,
-  buildLayers,
-  type HoverTarget,
-  type TrainMarker,
-} from "./layers";
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import DeckGL, { type DeckGLRef } from '@deck.gl/react';
+import { FlyToInterpolator, MapView, WebMercatorViewport, type MapViewState, type PickingInfo } from '@deck.gl/core';
+import { network, placeById, placeByStation, railwayById, railwaySymbol, region, stationById } from '../data';
+import { StationCode } from '../components/StationCode';
+import type { Route } from '../domain/route';
+import type { Place, Station } from '../domain/types';
+import { buildHoverLayers, buildLayers, type HoverTarget, type TrainMarker } from './layers';
 import {
   buildTransferLayers,
+  placeScene,
   transferCamera,
+  transferScene,
   transferTags,
   type TransferViewState,
-} from "./transferLayers";
-import type { Ground } from "../domain/ground";
-import {
-  minLabelPriority,
-  placeLabels,
-  type LabelCandidate,
-  type LabelDensity,
-} from "./labels";
-import { MapControls, TILTED_PITCH } from "./MapControls";
-import {
-  COARSE_QUERY,
-  DESKTOP_QUERY,
-  useMediaQuery,
-} from "../hooks/useMediaQuery";
-import { sideViewFor } from "./camera";
-import {
-  BACKGROUND,
-  depthScale,
-  elevationOf,
-  TRANSFER_EXAGGERATION,
-} from "./style";
+} from './transferLayers';
+import { nearestTransferPlace, type Ground } from '../domain/ground';
+import { minLabelPriority, placeLabels, type LabelCandidate, type LabelDensity } from './labels';
+import { MapControls, TILTED_PITCH } from './MapControls';
+import { COARSE_QUERY, DESKTOP_QUERY, useMediaQuery } from '../hooks/useMediaQuery';
+import { sideViewFor } from './camera';
+import { BACKGROUND, depthScale, elevationOf, TRANSFER_EXAGGERATION } from './style';
 
 const INITIAL_VIEW: MapViewState = {
   ...region.view,
@@ -61,24 +30,24 @@ const INITIAL_VIEW: MapViewState = {
 };
 
 const VIEW = new MapView({ repeat: false });
+/** これより寄せて傾けると、中心に近い乗換駅のまわりを立体で描く */
+const NEARBY_ZOOM = 15.5;
 const NO_RAILWAYS: string[] = [];
 const NO_TRAINS: TrainMarker[] = [];
 /** マウスで操作しているとき（スマホでは出さない） */
-const canHover =
-  typeof window !== "undefined" &&
-  window.matchMedia?.("(hover: hover)").matches;
+const canHover = typeof window !== 'undefined' && window.matchMedia?.('(hover: hover)').matches;
 
-const DENSITY_KEY = "tokyo-rail-map:label-density";
+const DENSITY_KEY = 'tokyo-rail-map:label-density';
 
 function loadDensity(compact: boolean): LabelDensity {
   try {
     const v = localStorage.getItem(DENSITY_KEY);
-    if (v === "normal" || v === "major" || v === "none") return v;
+    if (v === 'normal' || v === 'major' || v === 'none') return v;
   } catch {
     // 保存できない環境では既定のまま
   }
   // スマホは画面が狭いので、主要駅だけにする
-  return compact ? "major" : "normal";
+  return compact ? 'major' : 'normal';
 }
 
 interface Hover {
@@ -94,9 +63,9 @@ interface Hover {
 /** カーソルの下にあるものから、表示する文を作る。駅でも路線でもなければ null */
 function hoverOf(info: PickingInfo): Hover | null {
   if (!canHover || !info.object || !info.layer) return null;
-  if (info.layer.id === "stations" || info.layer.id === "focus-stations") {
+  if (info.layer.id === 'stations' || info.layer.id === 'focus-stations') {
     const s = info.object as Station;
-    const code = s.code ? `${s.code} ` : "";
+    const code = s.code ? `${s.code} ` : '';
     return {
       x: info.x,
       y: info.y,
@@ -104,7 +73,7 @@ function hoverOf(info: PickingInfo): Hover | null {
       target: { stationId: s.id },
     };
   }
-  if (info.layer.id === "railways") {
+  if (info.layer.id === 'railways') {
     const r = railwayById.get((info.object as { id: string }).id);
     return r
       ? {
@@ -145,9 +114,7 @@ const groundCache = new Map<string, Promise<Ground | null>>();
 function loadGround(placeId: string): Promise<Ground | null> {
   let p = groundCache.get(placeId);
   if (!p) {
-    p = fetch(
-      `${import.meta.env.BASE_URL}ground/${encodeURIComponent(encodeURIComponent(placeId))}.json`,
-    )
+    p = fetch(`${import.meta.env.BASE_URL}ground/${encodeURIComponent(encodeURIComponent(placeId))}.json`)
       .then((res) => (res.ok ? (res.json() as Promise<Ground>) : null))
       // 読めなくても地下のホームだけで出す
       .catch(() => null);
@@ -162,8 +129,7 @@ function useSize(ref: React.RefObject<HTMLDivElement | null>) {
     const el = ref.current;
     if (!el) return;
     const ro = new ResizeObserver(([e]) => {
-      if (e)
-        setSize({ width: e.contentRect.width, height: e.contentRect.height });
+      if (e) setSize({ width: e.contentRect.width, height: e.contentRect.height });
     });
     ro.observe(el);
     return () => ro.disconnect();
@@ -193,9 +159,7 @@ export function RailMap({
   const coarse = useMediaQuery(COARSE_QUERY);
   /** スマホでは駅名ラベルを小さくする（英字を出さない） */
   const compact = !desktop;
-  const [density, setDensity] = useState<LabelDensity>(() =>
-    loadDensity(compact),
-  );
+  const [density, setDensity] = useState<LabelDensity>(() => loadDensity(compact));
   const changeDensity = (d: LabelDensity) => {
     setDensity(d);
     try {
@@ -212,30 +176,34 @@ export function RailMap({
     return () => clearTimeout(t);
   }, [railCard]);
 
-  const [grounds, setGrounds] = useState<TransferViewState["grounds"]>([]);
+  // 立体で描く駅。乗換を見るときはその乗換、地図を寄せて傾けたときは中心に近い乗換駅（首都圏だけ。地上のデータがある）
+  const nearby = useMemo(
+    () =>
+      !transfer && region.id === 'tokyo' && viewState.zoom >= NEARBY_ZOOM && (viewState.pitch ?? 0) >= 20
+        ? nearestTransferPlace(network.places, [viewState.longitude, viewState.latitude])
+        : null,
+    [transfer, viewState.zoom, viewState.pitch, viewState.longitude, viewState.latitude],
+  );
+  const scene = useMemo(
+    () => (transfer ? transferScene(transfer.from, transfer.to) : nearby ? placeScene(nearby) : null),
+    [transfer, nearby],
+  );
+  const [grounds, setGrounds] = useState<TransferViewState['grounds']>([]);
   useEffect(() => {
     setGrounds([]);
-    if (!transfer) return;
+    if (!scene) return;
     let alive = true;
-    const places = [
-      ...new Set(
-        [transfer.from, transfer.to].map((id) => placeByStation.get(id)!),
-      ),
-    ];
+    const places = [...new Set(scene.main.map((id) => placeByStation.get(id)!))];
     // 地上のデータは region が首都圏のときだけある（関西はまだ作っていない）
-    if (region.id !== "tokyo") return;
+    if (region.id !== 'tokyo') return;
     void Promise.all(places.map((p) => loadGround(p.id))).then((gs) => {
       if (!alive) return;
-      setGrounds(
-        places.flatMap((p, i) =>
-          gs[i] ? [{ center: p.coord, ground: gs[i]! }] : [],
-        ),
-      );
+      setGrounds(places.flatMap((p, i) => (gs[i] ? [{ center: p.coord, ground: gs[i]! }] : [])));
     });
     return () => {
       alive = false;
     };
-  }, [transfer]);
+  }, [scene]);
 
   const fly = (patch: Partial<MapViewState>) =>
     setViewState((v) => ({
@@ -256,7 +224,7 @@ export function RailMap({
         x,
         y,
         radius: 12,
-        layerIds: ["focus-stations", "stations"],
+        layerIds: ['focus-stations', 'stations'],
       });
       const station = near?.object as Station | undefined;
       const place = station ? placeByStation.get(station.id) : undefined;
@@ -276,11 +244,7 @@ export function RailMap({
       .filter((r) => focusRailways.includes(r.id))
       .flatMap((r) => r.stations.map((id) => stationById.get(id)!.coord));
     if (coords.length === 0) return;
-    const view = sideViewFor(
-      coords,
-      width >= 768 ? width - 360 : width - 32,
-      width >= 768 ? 170 : 0,
-    );
+    const view = sideViewFor(coords, width >= 768 ? width - 360 : width - 32, width >= 768 ? 170 : 0);
     setViewState((v) => ({
       ...v,
       ...view,
@@ -298,10 +262,7 @@ export function RailMap({
     const metersPerPixel = (380 * 1.2) / (visible * 0.8);
     const zoom = Math.min(
       16.4,
-      Math.log2(
-        (40075016.686 * Math.cos((center[1] * Math.PI) / 180)) /
-          (512 * metersPerPixel),
-      ),
+      Math.log2((40075016.686 * Math.cos((center[1] * Math.PI) / 180)) / (512 * metersPerPixel)),
     );
     setViewState((v) => ({
       ...v,
@@ -319,11 +280,8 @@ export function RailMap({
 
   // 経路が決まったら（乗換を見るのをやめたときも）、経路全体が見えるようにカメラを寄せる
   useEffect(() => {
-    if (transfer || !route || route.legs.length === 0 || !width || !height)
-      return;
-    const coords = route.legs.flatMap((l) =>
-      l.stations.map((id) => stationById.get(id)!.coord),
-    );
+    if (transfer || !route || route.legs.length === 0 || !width || !height) return;
+    const coords = route.legs.flatMap((l) => l.stations.map((id) => stationById.get(id)!.coord));
     const lons = coords.map((c) => c[0]);
     const lats = coords.map((c) => c[1]);
     const fitted = new WebMercatorViewport({ width, height }).fitBounds(
@@ -363,23 +321,15 @@ export function RailMap({
   const viewportSize = Math.min(width, height) || 900;
   const pitchStep = Math.round(viewState.pitch ?? 0);
   const scale = useMemo(() => {
-    const s = depthScale(
-      zoomStep,
-      viewportSize,
-      pitchStep,
-      region.view.latitude,
-    );
-    // 乗換を見るときは深さを強めにする（実際の約 3 倍。寄っているので駅から離れすぎない）
-    return transfer && zoomStep >= 15
+    const s = depthScale(zoomStep, viewportSize, pitchStep, region.view.latitude);
+    // 駅のまわりを立体で見るときは深さを強めにする（実際の約 3 倍。寄っているので駅から離れすぎない）
+    return scene && zoomStep >= 15
       ? {
           ...s,
-          exaggeration: Math.max(
-            s.exaggeration,
-            TRANSFER_EXAGGERATION * Math.min(1, pitchStep / 45),
-          ),
+          exaggeration: Math.max(s.exaggeration, TRANSFER_EXAGGERATION * Math.min(1, pitchStep / 45)),
         }
       : s;
-  }, [zoomStep, viewportSize, pitchStep, transfer]);
+  }, [zoomStep, viewportSize, pitchStep, scene]);
   const layers = useMemo(
     () =>
       buildLayers({
@@ -391,41 +341,24 @@ export function RailMap({
         onPickRailway: onPickRailway ? pickRailway : undefined,
         scale,
       }),
-    [
-      route,
-      endpoints,
-      stationColors,
-      focusRailways,
-      onPick,
-      onPickRailway,
-      pickRailway,
-      scale,
-    ],
+    [route, endpoints, stationColors, focusRailways, onPick, onPickRailway, pickRailway, scale],
   );
   // カーソルを乗せた駅・路線の強調。同じものの上で動かしている間は作り直さない
-  const hoverKey = hover
-    ? `${hover.target.stationId ?? ""}|${hover.target.railwayId ?? ""}`
-    : "";
+  const hoverKey = hover ? `${hover.target.stationId ?? ''}|${hover.target.railwayId ?? ''}` : '';
   const hoverLayers = useMemo(
     () => (hover ? buildHoverLayers(hover.target, scale) : []),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [hoverKey, scale],
   );
   const transferLayers = useMemo(
-    () =>
-      transfer ? buildTransferLayers({ ...transfer, grounds }, scale) : [],
-    [transfer, grounds, scale],
+    () => (scene ? buildTransferLayers({ ...scene, grounds }, scale) : []),
+    [scene, grounds, scale],
   );
   // 乗換の地上（建物・道路）は地面と方眼の後に、ホームと歩く線は経路より手前に描く（layers.ts の描く順番）
   const allLayers = useMemo(() => {
-    const at = layers.findIndex((l) => l.id === "interchange-outline");
+    const at = layers.findIndex((l) => l.id === 'interchange-outline');
     const isGround = (l: { id: string }) =>
-      [
-        "transfer-soil",
-        "transfer-box",
-        "transfer-roads",
-        "transfer-buildings",
-      ].includes(l.id);
+      ['transfer-soil', 'transfer-box', 'transfer-roads', 'transfer-buildings'].includes(l.id);
     return [
       ...layers.slice(0, at),
       ...transferLayers.filter(isGround),
@@ -439,49 +372,38 @@ export function RailMap({
     if (!width || !height || trains.length === 0) return [];
     const viewport = new WebMercatorViewport({ ...viewState, width, height });
     return trains.map((t) => {
-      const [x, y] = viewport.project([
-        t.coord[0],
-        t.coord[1],
-        elevationOf(t.depth, scale),
-      ]);
+      const [x, y] = viewport.project([t.coord[0], t.coord[1], elevationOf(t.depth, scale)]);
       return { ...t, x: x!, y: y! };
     });
   }, [trains, viewState, width, height, scale]);
   // 乗換の深さの札（ホームの位置に HTML で出す）
   const depthTags = useMemo(() => {
-    if (!transfer || !width || !height) return [];
+    if (!scene || !width || !height) return [];
     const viewport = new WebMercatorViewport({ ...viewState, width, height });
-    const tags = transferTags(transfer.from, transfer.to, scale)
+    const tags = transferTags(scene, scale)
       .map((t) => {
         const [x, y] = viewport.project(t.position);
         // 札は点の右に出す。右の操作ボタン（幅 76px）にかかるときは左に出す（幅は文字数からの目安）
         const w = t.text.length * 12 + 16;
-        const left =
-          x! + 14 + w > width - 76 ? Math.max(8, x! - 14 - w) : x! + 14;
+        const left = x! + 14 + w > width - 76 ? Math.max(8, x! - 14 - w) : x! + 14;
         return { ...t, x: left, y: y! };
       })
       .sort((a, b) => a.y - b.y);
-    // 2 つのホームが近いと札が重なるので、上下にずらす
+    // ホームが近いと札が重なるので、上下にずらす
     for (let i = 1; i < tags.length; i++) {
       const prev = tags[i - 1]!;
       const t = tags[i]!;
       if (Math.abs(t.x - prev.x) < 180 && t.y - prev.y < 26) t.y = prev.y + 26;
     }
     return tags;
-  }, [transfer, viewState, width, height, scale]);
-  const endpointIds = useMemo(
-    () => new Set(endpoints.map((p) => p.id)),
-    [endpoints],
-  );
+  }, [scene, viewState, width, height, scale]);
+  const endpointIds = useMemo(() => new Set(endpoints.map((p) => p.id)), [endpoints]);
 
   const labels = useMemo(() => {
     if (!width || !height) return [];
     const viewport = new WebMercatorViewport({ ...viewState, width, height });
     // 番号を出す路線: 強調中の路線と、経路で通る路線
-    const codeRailways = new Set([
-      ...focusRailways,
-      ...(route?.legs.map((l) => l.railway) ?? []),
-    ]);
+    const codeRailways = new Set([...focusRailways, ...(route?.legs.map((l) => l.railway) ?? [])]);
     const routePlaces = new Set(
       route?.legs
         .flatMap((l) => [l.stations[0]!, l.stations[l.stations.length - 1]!])
@@ -495,10 +417,7 @@ export function RailMap({
       const [x, y] = viewport.project([p.coord[0], p.coord[1], 0]);
       let priority = p.lines;
       const onFocus =
-        focusRailways.length > 0 &&
-        p.stations.some((id) =>
-          focusRailways.includes(stationById.get(id)!.railway),
-        );
+        focusRailways.length > 0 && p.stations.some((id) => focusRailways.includes(stationById.get(id)!.railway));
       if (onFocus) priority += 50;
       if (routePlaces.has(p.id)) priority += 100;
       const pinned = endpointIds.has(p.id);
@@ -541,18 +460,7 @@ export function RailMap({
       { left: 0, top: height - bottomInset, width, height: bottomInset },
     ];
     return placeLabels(candidates, width, height, max, compact, blocked);
-  }, [
-    viewState,
-    width,
-    height,
-    route,
-    endpointIds,
-    placeTimes,
-    focusRailways,
-    density,
-    compact,
-    bottomInset,
-  ]);
+  }, [viewState, width, height, route, endpointIds, placeTimes, focusRailways, density, compact, bottomInset]);
 
   // 強調中の路線の端に路線記号（"JK" など）を出す。画面で右にある方の端に置く
   const lineBadges = useMemo(() => {
@@ -562,13 +470,11 @@ export function RailMap({
       const r = railwayById.get(rid);
       const sym = railwaySymbol(rid);
       if (!r || !sym) return [];
-      const ends = [r.stations[0]!, r.stations[r.stations.length - 1]!].map(
-        (id) => {
-          const c = stationById.get(id)!.coord;
-          const [x, y] = viewport.project([c[0], c[1], 0]);
-          return { x: x!, y: y! };
-        },
-      );
+      const ends = [r.stations[0]!, r.stations[r.stations.length - 1]!].map((id) => {
+        const c = stationById.get(id)!.coord;
+        const [x, y] = viewport.project([c[0], c[1], 0]);
+        return { x: x!, y: y! };
+      });
       const end = ends[0]!.x > ends[1]!.x ? ends[0]! : ends[1]!;
       if (end.x < 0 || end.y < 0 || end.x > width || end.y > height) return [];
       return [{ id: rid, sym, color: r.color, x: end.x, y: end.y }];
@@ -576,24 +482,16 @@ export function RailMap({
   }, [viewState, width, height, focusRailways]);
 
   return (
-    <div
-      ref={ref}
-      className="absolute inset-0 overflow-hidden"
-      style={{ background: BACKGROUND }}
-    >
+    <div ref={ref} className="absolute inset-0 overflow-hidden" style={{ background: BACKGROUND }}>
       <DeckGL
         ref={deck}
         views={VIEW}
         viewState={viewState}
-        onViewStateChange={({ viewState: v }) =>
-          setViewState(v as MapViewState)
-        }
+        onViewStateChange={({ viewState: v }) => setViewState(v as MapViewState)}
         // 2 本指でも回転・傾きができる（右下のボタンで真上・北向きに戻せる）
         controller={{ dragRotate: true, touchRotate: true, inertia: 300 }}
         layers={allLayers}
-        getCursor={({ isHovering, isDragging }) =>
-          isDragging ? "grabbing" : isHovering ? "pointer" : "grab"
-        }
+        getCursor={({ isHovering, isDragging }) => (isDragging ? 'grabbing' : isHovering ? 'pointer' : 'grab')}
         // 駅の点・線の近くでもクリックできるように（指では広めに）
         pickingRadius={coarse ? 16 : 6}
         // 名前の出ていない駅でも、カーソルを乗せると駅名と路線が分かる（表示は下の HTML で自前で出す）
@@ -612,7 +510,7 @@ export function RailMap({
               type="button"
               key={l.id}
               aria-label={`${l.ja}駅を選ぶ`}
-              className={`station-label pointer-events-auto absolute flex cursor-pointer items-center justify-center gap-1 rounded-lg px-1.5 transition-transform hover:-translate-y-0.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900 ${active ? "bg-slate-900 text-white" : "bg-white text-slate-900 hover:bg-slate-50"} ${l.dim ? "opacity-40 hover:opacity-80" : ""}`}
+              className={`station-label pointer-events-auto absolute flex cursor-pointer items-center justify-center gap-1 rounded-lg px-1.5 transition-transform hover:-translate-y-0.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900 ${active ? 'bg-slate-900 text-white' : 'bg-white text-slate-900 hover:bg-slate-50'} ${l.dim ? 'opacity-40 hover:opacity-80' : ''}`}
               style={{
                 left: l.left,
                 top: l.top,
@@ -629,21 +527,17 @@ export function RailMap({
                 <StationCode key={c.code} code={c.code} color={c.color} />
               ))}
               <span className="flex min-w-0 flex-1 flex-col items-center">
-                <span
-                  className={`${compact ? "text-[13px]" : "text-[15px]"} leading-tight font-bold`}
-                >
+                <span className={`${compact ? 'text-[13px]' : 'text-[15px]'} leading-tight font-bold`}>
                   {l.ja}
                   {l.time && (
-                    <span
-                      className={`ml-1.5 tabular-nums ${active ? "text-sky-300" : "text-[#1c5cab]"}`}
-                    >
+                    <span className={`ml-1.5 tabular-nums ${active ? 'text-sky-300' : 'text-[#1c5cab]'}`}>
                       {l.time}
                     </span>
                   )}
                 </span>
                 {!compact && (
                   <span
-                    className={`text-[10px] leading-tight font-semibold tracking-[0.12em] ${active ? "text-slate-300" : "text-slate-400"}`}
+                    className={`text-[10px] leading-tight font-semibold tracking-[0.12em] ${active ? 'text-slate-300' : 'text-slate-400'}`}
                   >
                     {l.en}
                   </span>
@@ -683,7 +577,7 @@ export function RailMap({
             style={{
               left: hover.x + 14,
               top: hover.y + 16,
-              transform: `translate(${hover.x > width - 240 ? "calc(-100% - 28px)" : "0"}, ${hover.y > height - 60 ? "calc(-100% - 32px)" : "0"})`,
+              transform: `translate(${hover.x > width - 240 ? 'calc(-100% - 28px)' : '0'}, ${hover.y > height - 60 ? 'calc(-100% - 32px)' : '0'})`,
             }}
           >
             {hover.color && (
@@ -708,13 +602,7 @@ export function RailMap({
           />
         ))}
       </div>
-      {transfer && (
-        <TransferBar
-          transfer={transfer}
-          top={desktop ? 16 : 76}
-          onClose={() => onCloseTransfer?.()}
-        />
-      )}
+      {transfer && <TransferBar transfer={transfer} top={desktop ? 16 : 76} onClose={() => onCloseTransfer?.()} />}
       <MapControls
         pitch={viewState.pitch ?? 0}
         bearing={viewState.bearing ?? 0}
@@ -724,10 +612,7 @@ export function RailMap({
         onDensity={changeDensity}
         onZoom={(d) =>
           fly({
-            zoom: Math.min(
-              INITIAL_VIEW.maxZoom!,
-              Math.max(INITIAL_VIEW.minZoom!, viewState.zoom + d),
-            ),
+            zoom: Math.min(INITIAL_VIEW.maxZoom!, Math.max(INITIAL_VIEW.minZoom!, viewState.zoom + d)),
           })
         }
         onPitch={(pitch) => fly({ pitch })}
@@ -772,25 +657,12 @@ function RailwayCard({
       style={{ bottom: bottom + 12 }}
     >
       <div className="panel pointer-events-auto flex items-center gap-2 rounded-xl bg-white/95 py-1.5 pr-1.5 pl-3 text-sm font-semibold backdrop-blur">
-        <span
-          className="h-3 w-3 shrink-0 rounded-full"
-          style={{ background: r.color }}
-          aria-hidden="true"
-        />
+        <span className="h-3 w-3 shrink-0 rounded-full" style={{ background: r.color }} aria-hidden="true" />
         <span className="truncate">{r.ja}</span>
-        <button
-          type="button"
-          className="btn shrink-0 !py-2 text-xs"
-          onClick={onToggle}
-        >
-          {focused ? "強調を外す" : "強調する"}
+        <button type="button" className="btn shrink-0 !py-2 text-xs" onClick={onToggle}>
+          {focused ? '強調を外す' : '強調する'}
         </button>
-        <button
-          type="button"
-          className="h-9 w-9 shrink-0 text-slate-400"
-          aria-label="閉じる"
-          onClick={onClose}
-        >
+        <button type="button" className="h-9 w-9 shrink-0 text-slate-400" aria-label="閉じる" onClick={onClose}>
           ×
         </button>
       </div>
@@ -812,13 +684,9 @@ function TransferBar({
   const to = stationById.get(transfer.to)!;
   const line = (s: Station) => railwayById.get(s.railway)!;
   const place = (s: Station) => placeByStation.get(s.id)!.ja;
-  const name =
-    place(from) === place(to) ? place(from) : `${place(from)} → ${place(to)}`;
+  const name = place(from) === place(to) ? place(from) : `${place(from)} → ${place(to)}`;
   return (
-    <div
-      className="pointer-events-none absolute inset-x-0 z-10 flex justify-center px-3"
-      style={{ top }}
-    >
+    <div className="pointer-events-none absolute inset-x-0 z-10 flex justify-center px-3" style={{ top }}>
       <div className="panel pointer-events-auto flex max-w-full items-center gap-2 rounded-xl bg-white/95 py-1.5 pr-1.5 pl-3 text-sm backdrop-blur md:ml-[360px]">
         <span className="shrink-0 font-bold">{name}</span>
         <span className="flex min-w-0 items-center gap-1 truncate text-xs font-semibold">
@@ -826,11 +694,7 @@ function TransferBar({
           <span className="text-slate-400">→</span>
           <span style={{ color: line(to).color }}>{line(to).ja}</span>
         </span>
-        <button
-          type="button"
-          className="btn shrink-0 !py-2 text-xs"
-          onClick={onClose}
-        >
+        <button type="button" className="btn shrink-0 !py-2 text-xs" onClick={onClose}>
           経路全体に戻る
         </button>
       </div>

@@ -1,3 +1,5 @@
+import type { Place } from './types';
+
 /**
  * 乗換駅のまわりの地上（建物・道路）。座標は駅（Place）の位置からのメートル（東・北）を
  * [x0, y0, x1, y1, ...] と平らに並べる（ファイルを小さくするため）
@@ -158,4 +160,20 @@ export function insideConvex(p: [number, number], poly: [number, number][]): boo
     }
   }
   return true;
+}
+
+/** 地図の中心に近い乗換駅（2 路線以上）。maxMeters より遠ければ null */
+export function nearestTransferPlace(places: Place[], center: [number, number], maxMeters = 350): Place | null {
+  const kx = 111320 * Math.cos((center[1] * Math.PI) / 180);
+  let best: Place | null = null;
+  let bestD = maxMeters;
+  for (const p of places) {
+    if (p.lines < 2) continue;
+    const d = Math.hypot((p.coord[0] - center[0]) * kx, (p.coord[1] - center[1]) * 111320);
+    if (d <= bestD) {
+      best = p;
+      bestD = d;
+    }
+  }
+  return best;
 }

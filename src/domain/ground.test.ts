@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import type { Place } from './types';
 import {
   buildingHeight,
   depthText,
   insideConvex,
+  nearestTransferPlace,
   platformEnds,
   ringArea,
   roadWidth,
@@ -93,5 +95,14 @@ describe('乗換を横から見る', () => {
     const sq = squareAround([139.7, 35.6], 100, 30);
     expect(insideConvex([139.7, 35.6], sq)).toBe(true);
     expect(insideConvex([139.71, 35.6], sq)).toBe(false);
+  });
+
+  it('地図の中心に近い乗換駅（2 路線以上）を選び、遠ければ選ばない', () => {
+    const place = (id: string, lines: number, coord: [number, number]) =>
+      ({ id, ja: id, en: id, coord, stations: [], lines }) as Place;
+    const places = [place('a', 1, [139.7, 35.6]), place('b', 2, [139.702, 35.6]), place('c', 3, [139.71, 35.6])];
+    // a は乗換駅でないので、200m ほど離れた b
+    expect(nearestTransferPlace(places, [139.7, 35.6])?.id).toBe('b');
+    expect(nearestTransferPlace(places, [139.69, 35.6])).toBeNull();
   });
 });

@@ -28,6 +28,6 @@
   時刻表は `public/timetable/day/{weekday,holiday}/{HH}.json`（1 時間ごと）と `index.json`。必要な時間だけ `src/data/dayTimetable.ts` で読み込む
 - 時刻表は終電タブを開いたときに `src/data/timetable.ts` で遅延読み込みする
 - 終電マップの色は `src/domain/lastTrainColors.ts`（1 色の連続スケール。色を増やすときは同じ青の段階から）
-- 「乗換を見る」は `src/map/transferLayers.ts`（建物・道路は半透明で深度を書かない。ホームと歩く線は経路より手前）。データの形と高さ・幅の目安は `src/domain/ground.ts`
+- 「乗換を見る」と、地図を寄せて傾けたとき（ズーム 15.5 以上）の近くの乗換駅の立体は `src/map/transferLayers.ts`（建物・道路は半透明で深度を書かない。ホームと歩く線は経路より手前）。データの形と高さ・幅の目安は `src/domain/ground.ts`
 - UI の文言は日本語
 - 別の地域（関西版など）を足すときは `.claude/skills/add-region/SKILL.md` に従う

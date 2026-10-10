@@ -12,24 +12,37 @@ import {
   transferAxis,
   type Ground,
 } from '../domain/ground';
-import type { Station } from '../domain/types';
+import type { Place, Station } from '../domain/types';
 import { elevationOf, hexToRgb, type DepthScale } from './style';
 
 type Position3 = [number, number, number];
 
-export interface TransferViewState {
-  /** 乗り換える前・後の駅（路線ごとの駅） */
-  from: string;
-  to: string;
+/**
+ * 駅のまわりの立体に描くもの。
+ *   乗換を見る: 乗り換える 2 つの駅を太く描き、間を歩く線で結ぶ。2 つのホームが左右に並ぶ向きに箱を置く
+ *   地図を寄せたとき: いちばん近い乗換駅のすべての路線のホーム。箱は北を上にする
+ */
+export interface GroundScene {
+  /** 描くホーム（路線ごとの駅） */
+  stations: string[];
+  /** 太く描いて深さの札を付けるホーム */
+  main: string[];
+  /** 歩く線（乗り換える前・後の駅） */
+  walk: [string, string] | null;
+  center: [number, number];
+  bearing: number;
+}
+
+export interface TransferViewState extends GroundScene {
   /** 読み込んだ地上のデータ（place ID ごと） */
   grounds: { center: [number, number]; ground: Ground }[];
 }
 
 /** 乗換の前後の駅と、同じ駅（Place）にあるほかの路線の駅 */
-function stationsAround(from: string, to: string): Station[] {
+function stationsAround(from: string, to: string): string[] {
   const ids = new Set([from, to]);
   for (const id of [from, to]) for (const s of placeByStation.get(id)?.stations ?? []) ids.add(s);
-  return [...ids].map((id) => stationById.get(id)!);
+  return [...ids];
 }
 
 /** 路線の前後の駅の位置 */
@@ -51,22 +64,49 @@ export function transferCamera(from: string, to: string): { center: [number, num
   return { center: [(a.coord[0] + b.coord[0]) / 2, (a.coord[1] + b.coord[1]) / 2], bearing: sideBearing(l, r) };
 }
 
-/** 乗り換える 2 つのホームの深さの札（位置は地図の座標。RailMap が画面に投影して HTML で出す） */
+/** 乗換を見るときに描くもの */
+export function transferScene(from: string, to: string): GroundScene {
+  return {
+    stations: stationsAround(from, to),
+    main: [...new Set([from, to])],
+    walk: [from, to],
+    ...transferCamera(from, to),
+  };
+}
+
+/** 地図を寄せたときに、その乗換駅（Place）のまわりに描くもの */
+export function placeScene(place: Place): GroundScene {
+  return { stations: place.stations, main: place.stations, walk: null, center: place.coord, bearing: 0 };
+}
+
+/** ホームの深さの札（位置は地図の座標。RailMap が画面に投影して HTML で出す）。地上の路線が 3 つ以上なら 1 枚にまとめる */
 export function transferTags(
-  from: string,
-  to: string,
+  scene: GroundScene,
   scale: DepthScale,
 ): { id: string; position: Position3; text: string; color: string }[] {
-  return [...new Set([from, to])].map((id) => {
-    const s = stationById.get(id)!;
+  const stations = scene.main.map((id) => stationById.get(id)!);
+  const above = stations.filter((s) => s.depth === 0);
+  const merge = above.length >= 3;
+  const tags = (merge ? stations.filter((s) => s.depth > 0) : stations).map((s) => {
     const r = railwayById.get(s.railway)!;
     return {
-      id,
-      position: [s.coord[0], s.coord[1], elevationOf(s.depth, scale)],
+      id: s.id,
+      position: [s.coord[0], s.coord[1], elevationOf(s.depth, scale)] as Position3,
       text: depthText(r.ja, s.depth),
       color: r.color,
     };
   });
+  if (merge) {
+    const lon = above.reduce((a, s) => a + s.coord[0], 0) / above.length;
+    const lat = above.reduce((a, s) => a + s.coord[1], 0) / above.length;
+    tags.unshift({
+      id: 'above',
+      position: [lon, lat, elevationOf(0, scale)],
+      text: `地上 ${above.length}路線`,
+      color: '#64748b',
+    });
+  }
+  return tags;
 }
 
 /** 点線（a から b まで、step m ごとに線と隙間を交互に） */
@@ -96,7 +136,7 @@ function dashes(path: Position3[], step = 6): [Position3, Position3][] {
  */
 export function buildTransferLayers(view: TransferViewState, scale: DepthScale): Layer[] {
   const groundZ = elevationOf(0, scale);
-  const { center, bearing } = transferCamera(view.from, view.to);
+  const { center, bearing } = view;
   const square = squareAround(center, BOX_HALF, bearing);
   const inBox = (p: [number, number]) => insideConvex(p, square);
   // 地上は箱の上だけ（はみ出す建物は描かない、道路は箱の中の区間だけ）
@@ -115,7 +155,7 @@ export function buildTransferLayers(view: TransferViewState, scale: DepthScale):
     ),
   );
   const z = (s: Station) => elevationOf(s.depth, scale);
-  const around = stationsAround(view.from, view.to);
+  const around = view.stations.map((id) => stationById.get(id)!);
   // 箱の底は、いちばん深いホームより少し下
   const bottomZ = elevationOf(Math.max(15, ...around.map((s) => s.depth + 12)), scale);
   const corners = (zz: number) => square.map(([x, y]) => [x, y, zz] as Position3);
@@ -130,7 +170,7 @@ export function buildTransferLayers(view: TransferViewState, scale: DepthScale):
     const [a, b] = platformEnds(s.coord, ...neighbors(s));
     return {
       id: s.id,
-      main: s.id === view.from || s.id === view.to,
+      main: view.main.includes(s.id),
       color: hexToRgb(railwayById.get(s.railway)!.color),
       path: [
         [a[0], a[1], z(s)],
@@ -138,21 +178,15 @@ export function buildTransferLayers(view: TransferViewState, scale: DepthScale):
       ] as Position3[],
     };
   });
-  const from = stationById.get(view.from)!;
-  const to = stationById.get(view.to)!;
   // ホームから地上へ上がり、地上を歩いて、次のホームへ下りる（通路の形のデータは無いので直線で）
-  const walk: Position3[] =
-    from.depth === 0 && to.depth === 0
-      ? [
-          [from.coord[0], from.coord[1], groundZ],
-          [to.coord[0], to.coord[1], groundZ],
-        ]
-      : [
-          [from.coord[0], from.coord[1], z(from)],
-          [from.coord[0], from.coord[1], groundZ],
-          [to.coord[0], to.coord[1], groundZ],
-          [to.coord[0], to.coord[1], z(to)],
-        ];
+  const walk: Position3[] = [];
+  if (view.walk) {
+    const from = stationById.get(view.walk[0])!;
+    const to = stationById.get(view.walk[1])!;
+    if (from.depth > 0 || to.depth > 0) walk.push([from.coord[0], from.coord[1], z(from)]);
+    walk.push([from.coord[0], from.coord[1], groundZ], [to.coord[0], to.coord[1], groundZ]);
+    if (from.depth > 0 || to.depth > 0) walk.push([to.coord[0], to.coord[1], z(to)]);
+  }
 
   return [
     // 地面の下の土（半透明）。底の面を置いて、地面の高さまで立ち上げる
@@ -214,7 +248,7 @@ export function buildTransferLayers(view: TransferViewState, scale: DepthScale):
     }),
     new LineLayer<[Position3, Position3]>({
       id: 'transfer-walk',
-      data: dashes(walk),
+      data: walk.length ? dashes(walk) : [],
       getSourcePosition: (d) => d[0],
       getTargetPosition: (d) => d[1],
       getColor: [30, 30, 30, 230],
