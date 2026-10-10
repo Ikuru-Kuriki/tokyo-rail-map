@@ -6,6 +6,7 @@
 
 - `npm run dev` / `npm test` / `npm run typecheck` / `npm run build`
 - `NODE_USE_ENV_PROXY=1 npm run data` で `src/data/network.json` を再生成（生成物もコミットする）
+- `NODE_USE_ENV_PROXY=1 npm run data:kansai` で関西の `src/data/regions/kansai/network.json` を再生成（国土数値情報 N02。元データは `.cache/n02/`）
 - `NODE_USE_ENV_PROXY=1 npm run timetable` で `public/timetable/*.json` を再生成（network.json の後に。元データは `.cache/` に保存）
 
 変更後は `npm run typecheck && npm test` を通すこと。

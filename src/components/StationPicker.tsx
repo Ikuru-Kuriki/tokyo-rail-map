@@ -1,5 +1,5 @@
 import { useId, useRef, useState } from 'react';
-import { network, railwaysOf, stationCode } from '../data';
+import { network, railwaysOf, region, stationCode } from '../data';
 import { clearStationHistory, useStationHistory } from '../data/history';
 import { searchPlaces } from '../domain/search';
 import type { Place } from '../domain/types';
@@ -52,7 +52,7 @@ export function StationPicker({ label, value, onChange, active, onFocus }: Props
       <input
         id={id}
         className={`w-full rounded-lg border bg-white px-3 py-2 text-[15px] font-semibold outline-none placeholder:font-normal placeholder:text-slate-400 ${active ? 'border-slate-900 ring-2 ring-slate-900/10' : 'border-slate-200'}`}
-        placeholder="駅名を入力（例: 新宿 / shinjuku）"
+        placeholder={`駅名を入力（例: ${region.example}）`}
         autoComplete="off"
         enterKeyHint="done"
         value={editing ? query : (value?.ja ?? '')}

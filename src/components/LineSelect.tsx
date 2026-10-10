@@ -25,12 +25,37 @@ const OPERATORS: [string, string][] = [
   ['Yurikamome', 'ゆりかもめ'],
   ['TokyoMonorail', '東京モノレール'],
   ['TamaMonorail', '多摩モノレール'],
+  // 関西
+  ['JR-West', 'JR西日本'],
+  ['OsakaMetro', 'Osaka Metro'],
+  ['Kitakyu', '北大阪急行'],
+  ['KyotoSubway', '京都市営地下鉄'],
+  ['KobeSubway', '神戸市営地下鉄'],
+  ['KobeNewTransit', '神戸新交通'],
+  ['Hankyu', '阪急'],
+  ['Hanshin', '阪神'],
+  ['Keihan', '京阪'],
+  ['Kintetsu', '近鉄'],
+  ['Nankai', '南海'],
+  ['Sanyo', '山陽電車'],
+  ['Shintetsu', '神戸電鉄'],
+  ['Nose', '能勢電鉄'],
+  ['OsakaMonorail', '大阪モノレール'],
+  ['Eiden', '叡山電鉄'],
+  ['Randen', '嵐電'],
+  ['Mizuma', '水間鉄道'],
+  ['Wakayama', '和歌山電鐵'],
 ];
+
+const known = new Set(OPERATORS.map(([prefix]) => prefix));
 
 const groups = OPERATORS.map(([prefix, name]) => ({
   name,
   railways: network.railways.filter((r) => r.id.split('.')[0] === prefix),
-})).filter((g) => g.railways.length > 0);
+}))
+  // 表に無い会社の路線は「その他」に入れる（選べなくならないように）
+  .concat({ name: 'その他', railways: network.railways.filter((r) => !known.has(r.id.split('.')[0]!)) })
+  .filter((g) => g.railways.length > 0);
 
 const label = (id: string) => {
   const r = network.railways.find((x) => x.id === id)!;

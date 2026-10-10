@@ -10,6 +10,7 @@
     "typecheck": "tsc -b",
     "test": "vitest run",
     "data": "node scripts/build-data.ts",
+    "data:kansai": "node scripts/build-data-kansai.ts",
     "timetable": "node scripts/build-timetable.ts"
   },
   "dependencies": {

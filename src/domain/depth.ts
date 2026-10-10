@@ -70,3 +70,69 @@ export function stationDepth(railway: string, name: string, underground: boolean
   if (exact !== undefined) return exact;
   return LINE_DEPTH[railway] ?? (railway.startsWith('JR-') ? JR_DEPTH : DEFAULT_DEPTH);
 }
+
+// ---------------------------------------------------------------- 関西
+
+/** 関西の地下区間の代表的な深さ（路線 ID → m） */
+const KANSAI_LINE_DEPTH: Record<string, number> = {
+  'OsakaMetro.Midosuji': 12,
+  'OsakaMetro.Tanimachi': 18,
+  'OsakaMetro.Yotsubashi': 14,
+  'OsakaMetro.Chuo': 16,
+  'OsakaMetro.Sennichimae': 18,
+  'OsakaMetro.Sakaisuji': 15,
+  'OsakaMetro.Nagahori': 28,
+  'OsakaMetro.Imazatosuji': 24,
+  'Kitakyu.NambokuLine': 15,
+  'KyotoSubway.Karasuma': 15,
+  'KyotoSubway.Tozai': 20,
+  'KobeSubway.SeishinYamate': 20,
+  'KobeSubway.Kaigan': 18,
+  'JR-West.Tozai': 25,
+  'Keihan.Nakanoshima': 25,
+};
+
+/** 全線地下の路線のうち、地上・高架にある駅 */
+const KANSAI_ABOVE_GROUND: Record<string, string[]> = {
+  'OsakaMetro.Midosuji': ['江坂', '東三国', '新大阪', '西中島南方'],
+  'OsakaMetro.Chuo': ['大阪港', '朝潮橋', '弁天町', '九条'],
+  'OsakaMetro.Tanimachi': ['八尾南'],
+  'Kitakyu.NambokuLine': ['桃山台', '緑地公園', '箕面萱野'],
+  'KyotoSubway.Karasuma': ['竹田'],
+  'KobeSubway.SeishinYamate': ['谷上', '総合運動公園', '学園都市', '伊川谷', '西神南', '西神中央'],
+  'JR-West.Tozai': ['京橋', '尼崎'],
+};
+
+/** 一部だけ地下の路線の、地下の駅（路線 ID → 駅名 → 深さ m） */
+const KANSAI_UNDERGROUND: Record<string, Record<string, number>> = {
+  'Keihan.Main': {
+    淀屋橋: 15,
+    北浜: 15,
+    天満橋: 15,
+    七条: 10,
+    清水五条: 10,
+    祇園四条: 10,
+    三条: 10,
+    神宮丸太町: 12,
+    出町柳: 12,
+  },
+  'Hankyu.Kyoto': { 大宮: 10, 烏丸: 12, 京都河原町: 12 },
+  'Hankyu.KobeKosoku': { 花隈: 12, 高速神戸: 15, 新開地: 15 },
+  'Hanshin.Main': { 大阪梅田: 10, 神戸三宮: 12, 元町: 12 },
+  'Hanshin.KobeKosoku': { 元町: 12, 西元町: 15, 高速神戸: 15, 新開地: 15, 大開: 12, 高速長田: 12, 西代: 12 },
+  'Hanshin.Namba': { 九条: 18, ドーム前: 18, 桜川: 18, 大阪難波: 15 },
+  'Shintetsu.KobeKosoku': { 湊川: 12, 新開地: 15 },
+  'Kintetsu.Nara': { 大阪難波: 15, 近鉄日本橋: 15, 大阪上本町: 10, 近鉄奈良: 10 },
+  'Kintetsu.Keihanna': { 長田: 15 },
+  'Keihan.Keishin': { 御陵: 15 },
+};
+
+/** 関西の駅の深さ（m）。N02 には地下の区別が無いので、表だけで決める */
+export function kansaiStationDepth(railway: string, name: string): number {
+  const partial = KANSAI_UNDERGROUND[railway];
+  if (partial) return partial[name] ?? 0;
+  const line = KANSAI_LINE_DEPTH[railway];
+  if (line === undefined) return 0;
+  if (KANSAI_ABOVE_GROUND[railway]?.includes(name)) return 0;
+  return line;
+}
