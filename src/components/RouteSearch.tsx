@@ -43,8 +43,8 @@ export function RouteSearch(props: Props) {
         </button>
       </div>
       {(!from || !to) && (
-        <p className="mt-3 text-xs text-slate-500">
-          地図上の駅をクリックしても選べます。ドラッグで移動、右ドラッグ（スマホは 2 本指）で回転・傾き。
+        <p className="mt-3 hidden text-xs text-slate-500 md:block">
+          地図上の駅をクリックしても選べます。ドラッグで移動、右ドラッグで回転・傾き。
         </p>
       )}
     </>
