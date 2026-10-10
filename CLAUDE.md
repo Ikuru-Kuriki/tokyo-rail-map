@@ -27,3 +27,4 @@
 - 時刻表は終電タブを開いたときに `src/data/timetable.ts` で遅延読み込みする
 - 終電マップの色は `src/domain/lastTrainColors.ts`（1 色の連続スケール。色を増やすときは同じ青の段階から）
 - UI の文言は日本語
+- 別の地域（関西版など）を足すときは `.claude/skills/add-region/SKILL.md` に従う
