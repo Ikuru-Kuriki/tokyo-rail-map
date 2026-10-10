@@ -1,7 +1,17 @@
 import { LineLayer, PathLayer, SolidPolygonLayer } from '@deck.gl/layers';
 import type { Layer } from '@deck.gl/core';
 import { placeByStation, railwayById, stationById } from '../data';
-import { platformEnds, toLonLat, type Ground } from '../domain/ground';
+import {
+  depthText,
+  insideConvex,
+  platformEnds,
+  sideBearing,
+  splitRuns,
+  squareAround,
+  toLonLat,
+  transferAxis,
+  type Ground,
+} from '../domain/ground';
 import type { Station } from '../domain/types';
 import { elevationOf, hexToRgb, type DepthScale } from './style';
 
@@ -30,6 +40,35 @@ function neighbors(s: Station): [[number, number] | undefined, [number, number] 
   return [at(i - 1), at(i + 1)];
 }
 
+/** 断面の箱の半辺（m）。地上のデータ（半径 260m）より内側にする */
+const BOX_HALF = 190;
+
+/** 乗換を見るカメラの中心と向き。乗り換える 2 つのホームが左右に並んで見える向きにする */
+export function transferCamera(from: string, to: string): { center: [number, number]; bearing: number } {
+  const a = stationById.get(from)!;
+  const b = stationById.get(to)!;
+  const [l, r] = transferAxis(a.coord, b.coord, ...neighbors(a));
+  return { center: [(a.coord[0] + b.coord[0]) / 2, (a.coord[1] + b.coord[1]) / 2], bearing: sideBearing(l, r) };
+}
+
+/** 乗り換える 2 つのホームの深さの札（位置は地図の座標。RailMap が画面に投影して HTML で出す） */
+export function transferTags(
+  from: string,
+  to: string,
+  scale: DepthScale,
+): { id: string; position: Position3; text: string; color: string }[] {
+  return [...new Set([from, to])].map((id) => {
+    const s = stationById.get(id)!;
+    const r = railwayById.get(s.railway)!;
+    return {
+      id,
+      position: [s.coord[0], s.coord[1], elevationOf(s.depth, scale)],
+      text: depthText(r.ja, s.depth),
+      color: r.color,
+    };
+  });
+}
+
 /** 点線（a から b まで、step m ごとに線と隙間を交互に） */
 function dashes(path: Position3[], step = 6): [Position3, Position3][] {
   const out: [Position3, Position3][] = [];
@@ -53,20 +92,41 @@ function dashes(path: Position3[], step = 6): [Position3, Position3][] {
  * 乗換駅に寄ったときの地上と地下の立体。
  *   地上: 建物（高さの目安で立ち上げ、半透明で地下が透けて見える）と道路
  *   地下: 路線ごとのホーム（その深さに路線の色の棒）。乗り換える 2 つのホームは太く、間を点線で結ぶ
+ *   断面: 駅のまわりを四角く切り取り、地面の下を土色の箱で描く（ジオラマのように、ホームが土の中にあると分かる）
  */
 export function buildTransferLayers(view: TransferViewState, scale: DepthScale): Layer[] {
   const groundZ = elevationOf(0, scale);
-  const buildings = view.grounds.flatMap(({ center, ground }) =>
-    ground.buildings.map(([h, ring]) => ({ h, polygon: toLonLat(ring, center) })),
+  const { center, bearing } = transferCamera(view.from, view.to);
+  const square = squareAround(center, BOX_HALF, bearing);
+  const inBox = (p: [number, number]) => insideConvex(p, square);
+  // 地上は箱の上だけ（はみ出す建物は描かない、道路は箱の中の区間だけ）
+  const buildings = view.grounds.flatMap(({ center: c, ground }) =>
+    ground.buildings.flatMap(([h, ring]) => {
+      const polygon = toLonLat(ring, c);
+      return polygon.every(inBox) ? [{ h, polygon }] : [];
+    }),
   );
-  const roads = view.grounds.flatMap(({ center, ground }) =>
-    ground.roads.map(([w, line]) => ({
-      w,
-      path: toLonLat(line, center).map(([x, y]) => [x, y, groundZ] as Position3),
-    })),
+  const roads = view.grounds.flatMap(({ center: c, ground }) =>
+    ground.roads.flatMap(([w, line]) =>
+      splitRuns(toLonLat(line, c), inBox).map((run) => ({
+        w,
+        path: run.map(([x, y]) => [x, y, groundZ] as Position3),
+      })),
+    ),
   );
   const z = (s: Station) => elevationOf(s.depth, scale);
-  const platforms = stationsAround(view.from, view.to).map((s) => {
+  const around = stationsAround(view.from, view.to);
+  // 箱の底は、いちばん深いホームより少し下
+  const bottomZ = elevationOf(Math.max(15, ...around.map((s) => s.depth + 12)), scale);
+  const corners = (zz: number) => square.map(([x, y]) => [x, y, zz] as Position3);
+  const top = corners(groundZ);
+  const bottom = corners(bottomZ);
+  const edges: [Position3, Position3][] = [
+    ...top.map((p, i) => [p, top[(i + 1) % 4]!] as [Position3, Position3]),
+    ...bottom.map((p, i) => [p, bottom[(i + 1) % 4]!] as [Position3, Position3]),
+    ...top.map((p, i) => [p, bottom[i]!] as [Position3, Position3]),
+  ];
+  const platforms = around.map((s) => {
     const [a, b] = platformEnds(s.coord, ...neighbors(s));
     return {
       id: s.id,
@@ -95,6 +155,28 @@ export function buildTransferLayers(view: TransferViewState, scale: DepthScale):
         ];
 
   return [
+    // 地面の下の土（半透明）。底の面を置いて、地面の高さまで立ち上げる
+    new SolidPolygonLayer<Position3[]>({
+      id: 'transfer-soil',
+      data: [bottom],
+      getPolygon: (d) => d,
+      extruded: true,
+      getElevation: groundZ - bottomZ,
+      getFillColor: [196, 168, 128, 70],
+      material: false,
+      parameters: { depthWriteEnabled: false },
+      updateTriggers: { getPolygon: scale, getElevation: scale },
+    }),
+    new LineLayer<[Position3, Position3]>({
+      id: 'transfer-box',
+      data: edges,
+      getSourcePosition: (d) => d[0],
+      getTargetPosition: (d) => d[1],
+      getColor: [140, 112, 78, 200],
+      getWidth: 1.5,
+      parameters: { depthWriteEnabled: false },
+      updateTriggers: { getSourcePosition: scale, getTargetPosition: scale },
+    }),
     new PathLayer<{ w: number; path: Position3[] }>({
       id: 'transfer-roads',
       data: roads,

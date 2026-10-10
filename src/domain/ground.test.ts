@@ -1,5 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { buildingHeight, platformEnds, ringArea, roadWidth, splitRuns, toLonLat, transfersOf } from './ground';
+import {
+  buildingHeight,
+  depthText,
+  insideConvex,
+  platformEnds,
+  ringArea,
+  roadWidth,
+  sideBearing,
+  splitRuns,
+  squareAround,
+  toLonLat,
+  transferAxis,
+  transfersOf,
+} from './ground';
 
 describe('ground', () => {
   it('建物の種類から高さを決め、描かない種類は 0', () => {
@@ -53,5 +66,32 @@ describe('ground', () => {
     expect(b[0] - 139.7).toBeCloseTo(139.7 - a[0]);
     const kx = 111320 * Math.cos((35.6 * Math.PI) / 180);
     expect((b[0] - a[0]) * kx).toBeCloseTo(200, 0);
+  });
+});
+
+describe('乗換を横から見る', () => {
+  it('西から東へ並ぶなら北が上のまま（bearing 0）', () => {
+    expect(sideBearing([139.7, 35.6], [139.71, 35.6])).toBeCloseTo(0);
+  });
+  it('南から北へ並ぶなら左に 90 度回す', () => {
+    expect(sideBearing([139.7, 35.6], [139.7, 35.61])).toBeCloseTo(-90);
+  });
+  it('2 駅が離れていればその 2 駅、近ければホームの向き', () => {
+    const prev: [number, number] = [139.69, 35.6];
+    const next: [number, number] = [139.71, 35.6];
+    expect(transferAxis([139.7, 35.6], [139.705, 35.6], prev, next)).toEqual([
+      [139.7, 35.6],
+      [139.705, 35.6],
+    ]);
+    expect(transferAxis([139.7, 35.6], [139.7001, 35.6], prev, next)).toEqual([prev, next]);
+  });
+  it('深さの札', () => {
+    expect(depthText('南北線', 28.4)).toBe('南北線 地下 約28m');
+    expect(depthText('山手線', 0)).toBe('山手線 地上');
+  });
+  it('正方形の中と外', () => {
+    const sq = squareAround([139.7, 35.6], 100, 30);
+    expect(insideConvex([139.7, 35.6], sq)).toBe(true);
+    expect(insideConvex([139.71, 35.6], sq)).toBe(false);
   });
 });

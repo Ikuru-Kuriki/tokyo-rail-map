@@ -90,3 +90,72 @@ export function platformEnds(
     [at[0] + (dx * half) / kx, at[1] + dy * half],
   ];
 }
+
+/**
+ * a から b への向きが画面の左から右になるカメラの向き（deck.gl の bearing、度）。
+ * 乗換を真横に近い角度から見るときに使う（路線の強調の sideViewFor と同じ決め方）
+ */
+export function sideBearing(a: [number, number], b: [number, number]): number {
+  const kx = Math.cos((((a[1] + b[1]) / 2) * Math.PI) / 180);
+  const heading = (Math.atan2((b[0] - a[0]) * kx, b[1] - a[1]) * 180) / Math.PI;
+  let bearing = heading - 90;
+  if (bearing > 180) bearing -= 360;
+  if (bearing <= -180) bearing += 360;
+  return bearing;
+}
+
+/**
+ * 乗換を横から見るときに左右に並べる 2 点。2 つの駅が離れていれば（徒歩連絡など）その 2 駅、
+ * ほぼ同じ位置なら乗る前のホームの向き（前後の駅）
+ */
+export function transferAxis(
+  from: [number, number],
+  to: [number, number],
+  fromPrev: [number, number] | undefined,
+  fromNext: [number, number] | undefined,
+  minMeters = 40,
+): [[number, number], [number, number]] {
+  const kx = 111320 * Math.cos((from[1] * Math.PI) / 180);
+  const d = Math.hypot((to[0] - from[0]) * kx, (to[1] - from[1]) * 111320);
+  if (d >= minMeters) return [from, to];
+  return [fromPrev ?? from, fromNext ?? to];
+}
+
+/** 深さの札の文言（深さは目安なので「約」を付ける） */
+export function depthText(railway: string, depth: number): string {
+  return depth > 0 ? `${railway} 地下 約${Math.round(depth)}m` : `${railway} 地上`;
+}
+
+/** 中心 c・半辺 half m・向き bearing（度）の正方形の 4 隅（経度・緯度）。画面の左右・奥行きにそろえる */
+export function squareAround(c: [number, number], half: number, bearing: number): [number, number][] {
+  const kx = 111320 * Math.cos((c[1] * Math.PI) / 180);
+  const t = (bearing * Math.PI) / 180;
+  // 画面の右向き（東から bearing だけ時計回り）と奥向き
+  const right: [number, number] = [Math.cos(t), -Math.sin(t)];
+  const up: [number, number] = [Math.sin(t), Math.cos(t)];
+  return [
+    [-1, -1],
+    [1, -1],
+    [1, 1],
+    [-1, 1],
+  ].map(([i, j]) => {
+    const x = (i! * right[0] + j! * up[0]) * half;
+    const y = (i! * right[1] + j! * up[1]) * half;
+    return [c[0] + x / kx, c[1] + y / 111320] as [number, number];
+  });
+}
+
+/** 点が多角形（凸）の中にあるか */
+export function insideConvex(p: [number, number], poly: [number, number][]): boolean {
+  let sign = 0;
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i]!;
+    const b = poly[(i + 1) % poly.length]!;
+    const cross = (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]);
+    if (cross !== 0) {
+      if (sign === 0) sign = Math.sign(cross);
+      else if (Math.sign(cross) !== sign) return false;
+    }
+  }
+  return true;
+}
