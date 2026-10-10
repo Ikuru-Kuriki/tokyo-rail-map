@@ -1,4 +1,4 @@
-import { useId, useState } from 'react';
+import { Fragment, useId, useState } from 'react';
 import { network, placeByStation, railwayById, stationById } from '../data';
 import type { SimulationState } from '../data/useSimulation';
 import { formatMinutes } from '../domain/lastTrain';
@@ -75,6 +75,22 @@ function railwaysOfRide(hops: { from: string; to: string }[]) {
   return ids.map((id) => railwayById.get(id)!);
 }
 
+/** 乗換駅。降りた駅と次に乗る駅が別の駅（徒歩連絡）なら、乗る駅も返す */
+function transferStations(prev: { to: string }[], next: { from: string }[]): { off: string; on: string | null } {
+  const off = prev[prev.length - 1]!.to;
+  const on = next[0]!.from;
+  const name = (id: string) => stationById.get(id)!.ja;
+  return { off: name(off), on: placeByStation.get(off)?.id === placeByStation.get(on)?.id ? null : name(on) };
+}
+
+function TransferChip({ name }: { name: string }) {
+  return (
+    <span className="rounded bg-white px-1 font-bold whitespace-nowrap text-slate-900 ring-1 ring-slate-300">
+      {name}
+    </span>
+  );
+}
+
 /** 行き方の候補の一覧。クリックで乗る電車を切り替える */
 function CandidateList({
   candidates,
@@ -95,7 +111,6 @@ function CandidateList({
         {candidates.map((c, k) => {
           const j = c.journey;
           const rides = j.legs.filter((l) => l.kind === 'ride');
-          const lines = rides.flatMap((l) => railwaysOfRide(l.hops)).filter((r, i, all) => all.indexOf(r) === i);
           const active = k === selected;
           return (
             <li key={k}>
@@ -121,12 +136,35 @@ function CandidateList({
                     </span>
                   ))}
                 </span>
-                <span className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
-                  {lines.map((r) => (
-                    <span key={r.id} className="inline-flex items-center gap-1 text-slate-700">
-                      <span className="h-1.5 w-3 rounded-full" style={{ background: r.color }} aria-hidden="true" />
-                      {r.ja}
-                    </span>
+                {/* 乗る路線を順に並べ、間に乗換駅を挟む（直通運転で路線が変わるところは →） */}
+                <span className="mt-0.5 flex flex-wrap items-center gap-x-1 gap-y-0.5">
+                  {rides.map((l, i) => (
+                    <Fragment key={i}>
+                      {i > 0 &&
+                        (() => {
+                          const t = transferStations(rides[i - 1]!.hops, l.hops);
+                          return (
+                            <span className="inline-flex flex-wrap items-center gap-1 text-slate-400">
+                              ›
+                              <TransferChip name={t.off} />
+                              {t.on && (
+                                <>
+                                  <span className="text-[10px]">徒歩</span>
+                                  <TransferChip name={t.on} />
+                                </>
+                              )}
+                              ›
+                            </span>
+                          );
+                        })()}
+                      {railwaysOfRide(l.hops).map((r, k) => (
+                        <span key={r.id} className="inline-flex items-center gap-1 text-slate-700">
+                          {k > 0 && <span className="text-slate-400">→</span>}
+                          <span className="h-1.5 w-3 rounded-full" style={{ background: r.color }} aria-hidden="true" />
+                          {r.ja}
+                        </span>
+                      ))}
+                    </Fragment>
                   ))}
                 </span>
               </button>

@@ -316,8 +316,8 @@ export function RailMap({
         views={VIEW}
         viewState={viewState}
         onViewStateChange={({ viewState: v }) => setViewState(v as MapViewState)}
-        // 指では 2 本指の回転を切る（ピンチで拡大しようとすると回ってしまうため）。回転・傾きは右下のボタンで
-        controller={{ dragRotate: true, touchRotate: !coarse, inertia: 300 }}
+        // 2 本指でも回転・傾きができる（右下のボタンで真上・北向きに戻せる）
+        controller={{ dragRotate: true, touchRotate: true, inertia: 300 }}
         layers={allLayers}
         getCursor={({ isHovering, isDragging }) => (isDragging ? 'grabbing' : isHovering ? 'pointer' : 'grab')}
         // 駅の点・線の近くでもクリックできるように（指では広めに）

@@ -1,4 +1,4 @@
-import { useId, useState } from 'react';
+import { useId, useRef, useState } from 'react';
 import { network, railwaysOf, stationCode } from '../data';
 import { clearStationHistory, useStationHistory } from '../data/history';
 import { searchPlaces } from '../domain/search';
@@ -24,10 +24,24 @@ export function StationPicker({ label, value, onChange, active, onFocus }: Props
   const showingHistory = editing && query.trim() === '';
   const results = !editing ? [] : showingHistory ? history : searchPlaces(network.places, query);
 
+  /** 今の入力で選んだか（入力欄から離れたときに、先頭の候補を自動で選ぶかどうかの判定に使う） */
+  const chosen = useRef(false);
+  /** 変換中に Enter を押した（変換が確定したら選ぶ） */
+  const enterWhileComposing = useRef(false);
+  const queryRef = useRef('');
+  queryRef.current = query;
+
   const choose = (p: Place) => {
+    chosen.current = true;
     onChange(p);
     setEditing(false);
     setQuery('');
+  };
+  /** 打った文字の先頭の候補を選ぶ（候補が無ければ何もしない） */
+  const chooseTop = (text: string) => {
+    const top = text.trim() ? searchPlaces(network.places, text)[0] : undefined;
+    if (top) choose(top);
+    return top !== undefined;
   };
 
   return (
@@ -40,19 +54,40 @@ export function StationPicker({ label, value, onChange, active, onFocus }: Props
         className={`w-full rounded-lg border bg-white px-3 py-2 text-[15px] font-semibold outline-none placeholder:font-normal placeholder:text-slate-400 ${active ? 'border-slate-900 ring-2 ring-slate-900/10' : 'border-slate-200'}`}
         placeholder="駅名を入力（例: 新宿 / shinjuku）"
         autoComplete="off"
+        enterKeyHint="done"
         value={editing ? query : (value?.ja ?? '')}
         onFocus={() => {
+          chosen.current = false;
           onFocus();
           setEditing(true);
           setQuery('');
           setHighlight(0);
         }}
-        onBlur={() => setTimeout(() => setEditing(false), 150)}
+        // スマホでは候補をタップせずにキーボードを閉じることが多いので、打った文字の先頭の候補を選ぶ
+        onBlur={() =>
+          setTimeout(() => {
+            if (!chosen.current) chooseTop(queryRef.current);
+            setEditing(false);
+          }, 150)
+        }
+        onCompositionEnd={(e) => {
+          const text = e.currentTarget.value;
+          setQuery(text);
+          if (enterWhileComposing.current) {
+            enterWhileComposing.current = false;
+            if (chooseTop(text)) e.currentTarget.blur();
+          }
+        }}
         onChange={(e) => {
           setQuery(e.target.value);
           setHighlight(0);
         }}
         onKeyDown={(e) => {
+          // 日本語入力の変換中の Enter（スマホの「確定」など）は、変換が確定してから選ぶ
+          if (e.key === 'Enter' && (e.nativeEvent.isComposing || e.keyCode === 229)) {
+            enterWhileComposing.current = true;
+            return;
+          }
           if (e.key === 'ArrowDown') setHighlight((h) => Math.min(h + 1, results.length - 1));
           else if (e.key === 'ArrowUp') setHighlight((h) => Math.max(h - 1, 0));
           else if (e.key === 'Enter' && results[highlight]) {
