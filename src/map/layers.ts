@@ -55,7 +55,8 @@ export interface LayerState {
   /** 強調する路線（複数可）。ほかの路線はグレースケールになる */
   focusRailways: string[];
   onPick: (place: Place) => void;
-  onPickRailway?: (railwayId: string) => void;
+  /** 線をクリックしたとき（x, y は画面上の位置） */
+  onPickRailway?: (railwayId: string, x: number, y: number) => void;
   /** 深さの強調倍率など（ズームで変わる。style.ts の depthScale） */
   scale: DepthScale;
 }
@@ -155,7 +156,7 @@ export function buildLayers({
       billboard: true,
       pickable: onPickRailway !== undefined,
       onClick: (info: PickingInfo<PathDatum>) => {
-        if (info.object) onPickRailway?.(info.object.id);
+        if (info.object) onPickRailway?.(info.object.id, info.x, info.y);
         return true;
       },
       updateTriggers: { getColor: [highlighting, focusRailways], getWidth: focusRailways },

@@ -24,14 +24,30 @@ export interface PlacedLabel extends LabelCandidate {
   height: number;
 }
 
+export interface Rect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+const overlaps = (a: Rect, b: Rect, margin: number) =>
+  a.left < b.left + b.width + margin &&
+  b.left < a.left + a.width + margin &&
+  a.top < b.top + b.height + margin &&
+  b.top < a.top + a.height + margin;
+
 export const LABEL_HEIGHT = 42;
+/** スマホ用の小さいラベル（英字を出さない）の高さ */
+export const COMPACT_LABEL_HEIGHT = 30;
 /** ラベルの下端と駅の点の間隔 */
 const GAP = 8;
 
 /** 駅ナンバリング 1 つ分の幅（枠と間隔を含む） */
 const CODE_WIDTH = 34;
 
-export function labelWidth(ja: string, en: string, time = '', codes = 0): number {
+export function labelWidth(ja: string, en: string, time = '', codes = 0, compact = false): number {
+  if (compact) return ja.length * 14 + (time ? time.length * 8 + 4 : 0) + 16 + codes * CODE_WIDTH;
   return Math.max(ja.length * 17 + (time ? time.length * 9 + 6 : 0), en.length * 7.6) + 24 + codes * CODE_WIDTH;
 }
 
@@ -44,27 +60,47 @@ export function placeLabels(
   width: number,
   height: number,
   max = 60,
+  /** スマホ用の小さいラベルにする */
+  compact = false,
+  /** ボタンなどで覆われていて、ラベルを置かない範囲（出発・到着などの固定のラベルは除く） */
+  blocked: Rect[] = [],
 ): PlacedLabel[] {
+  const h = compact ? COMPACT_LABEL_HEIGHT : LABEL_HEIGHT;
   const placed: PlacedLabel[] = [];
   const sorted = [...candidates].sort((a, b) => b.priority - a.priority);
   for (const c of sorted) {
     if (placed.length >= max) break;
-    const w = labelWidth(c.ja, c.en, c.time, c.codes?.length ?? 0);
+    const w = labelWidth(c.ja, c.en, c.time, c.codes?.length ?? 0, compact);
     let left = c.x - w / 2;
-    let top = c.y - LABEL_HEIGHT - GAP;
+    let top = c.y - h - GAP;
     if (c.pinned) {
       left = Math.min(Math.max(left, 4), width - w - 4);
-      top = Math.min(Math.max(top, 4), height - LABEL_HEIGHT - 4);
+      top = Math.min(Math.max(top, 4), height - h - 4);
     } else if (left < 0 || top < 0 || left + w > width || c.y > height) continue;
-    const hit = placed.some(
-      (p) =>
-        left < p.left + p.width + 4 &&
-        p.left < left + w + 4 &&
-        top < p.top + p.height + 4 &&
-        p.top < top + LABEL_HEIGHT + 4,
-    );
+    const rect = { left, top, width: w, height: h };
+    if (!c.pinned && blocked.some((b) => overlaps(rect, b, 0))) continue;
+    const hit = placed.some((p) => overlaps(rect, p, 4));
     if (hit) continue;
-    placed.push({ ...c, left, top, width: w, height: LABEL_HEIGHT });
+    placed.push({ ...c, left, top, width: w, height: h });
   }
   return placed;
+}
+
+/** 駅名ラベルの出し方: 標準・主要駅のみ・なし（出発・到着と経路の乗換駅だけ） */
+export type LabelDensity = 'normal' | 'major' | 'none';
+
+export const LABEL_DENSITIES: { value: LabelDensity; label: string }[] = [
+  { value: 'normal', label: '標準' },
+  { value: 'major', label: '主要駅' },
+  { value: 'none', label: 'なし' },
+];
+
+/**
+ * ラベルを出す優先度の下限。優先度は駅の路線数に、強調中の路線 +50、経路の乗換駅 +100、
+ * 出発・到着 +200 を足したもの。
+ */
+export function minLabelPriority(zoom: number, density: LabelDensity): number {
+  if (density === 'none') return 100;
+  if (density === 'major') return zoom < 11.3 ? 4 : zoom < 12.5 ? 3 : 2;
+  return zoom < 10.3 ? 3 : zoom < 11.3 ? 2 : 1;
 }

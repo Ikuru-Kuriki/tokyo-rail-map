@@ -25,6 +25,8 @@ import type { SimRouteInput, TimeKind } from './domain/simRoutes';
 import type { Route } from './domain/route';
 import type { TrainMarker } from './map/layers';
 import { SIM_COLORS, trainIconUrl } from './map/trainIcon';
+import { BottomSheet, sheetHeight, useViewportHeight, type SheetSnap } from './components/BottomSheet';
+import { DESKTOP_QUERY, useMediaQuery } from './hooks/useMediaQuery';
 
 type Mode = 'route' | 'last' | 'sim';
 
@@ -57,8 +59,12 @@ const newSimRoute = (): SimRouteInput => ({
 
 export default function App() {
   const [mode, setMode] = useState<Mode>('route');
-  /** 検索パネルを開いているか */
+  /** 検索パネルを開いているか（PC） */
   const [panelOpen, setPanelOpen] = useState(true);
+  /** スマホでは検索・結果を下から出るシートに入れる */
+  const desktop = useMediaQuery(DESKTOP_QUERY);
+  const viewportHeight = useViewportHeight();
+  const [sheetSnap, setSheetSnap] = useState<SheetSnap>('half');
   /** 強調する路線（複数可。ほかの路線はグレーになる） */
   const [focusRailways, setFocusRailways] = useState<string[]>([]);
 
@@ -67,6 +73,13 @@ export default function App() {
   const [to, setTo] = useState<Place | null>(null);
   const [slot, setSlot] = useState<Slot>('from');
   const route = useMemo(() => (from && to ? findRoute(network, graph, from, to) : null), [from, to]);
+  // 経路が出たら、スマホではシートを小さくして地図を見せる。
+  // 地図が経路に寄せるときにシートの高さを使うので、effect ではなく描画中に切り替える
+  const [shownRoute, setShownRoute] = useState(route);
+  if (route !== shownRoute) {
+    setShownRoute(route);
+    if (route && !desktop) setSheetSnap('peek');
+  }
 
   // 終電
   const [home, setHome] = useState<Place | null>(null);
@@ -273,6 +286,174 @@ export default function App() {
     [isSim, simRoutes, isLast, home, origin, from, to],
   );
 
+  const searchBody = (
+    <>
+      <div role="tablist" className="mb-3 flex rounded-lg bg-slate-100 p-0.5 text-sm font-semibold">
+        {(
+          [
+            ['route', '経路'],
+            ['last', '終電'],
+            ['sim', 'シミュレーション'],
+          ] as const
+        ).map(([value, label]) => (
+          <button
+            key={value}
+            type="button"
+            role="tab"
+            aria-selected={mode === value}
+            className={`flex-auto rounded-md px-2 py-1.5 whitespace-nowrap ${mode === value ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}
+            onClick={() => setMode(value)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {isSim ? (
+        <SimulationPanel
+          routes={simRoutes}
+          baseTime={simBaseTime}
+          day={day}
+          slot={simSlot}
+          state={sim}
+          choice={simChoice}
+          journeys={simJourneys}
+          customized={simRoutes.map((_, i) => Boolean(simCustom[i]))}
+          onResetCustom={(route) =>
+            setSimCustom((cur) => {
+              const next = [...cur];
+              next[route] = null;
+              return next;
+            })
+          }
+          onCustomize={(route, journey) =>
+            setSimCustom((cur) => {
+              const next = [...cur];
+              next[route] = journey;
+              return next;
+            })
+          }
+          onChoose={(route, index) =>
+            setSimChoice((cur) => {
+              const next = [...cur];
+              next[route] = index;
+              return next;
+            })
+          }
+          onSlot={setSimSlot}
+          onChange={(i, patch) => {
+            updateSimRoute(i, patch);
+            if (patch.from) setSimSlot({ route: i, field: 'to' });
+          }}
+          onAdd={() => {
+            if (simRoutes.length >= MAX_SIM_ROUTES) return;
+            setSimRoutes((rs) => [...rs, newSimRoute()]);
+            setSimSlot({ route: simRoutes.length, field: 'from' });
+          }}
+          onRemove={(i) => {
+            setSimRoutes((rs) => rs.filter((_, j) => j !== i));
+            setSimSlot({ route: 0, field: 'from' });
+          }}
+          onBaseTime={setSimBaseTime}
+          timeKind={simTimeKind}
+          onTimeKind={setSimTimeKind}
+          onDay={setDay}
+        />
+      ) : isLast ? (
+        <LastTrainSearch
+          home={home}
+          origin={origin}
+          day={day}
+          slot={lastSlot}
+          onSlot={setLastSlot}
+          onHome={(p) => {
+            setHome(p);
+            if (p) setLastSlot('origin');
+          }}
+          onOrigin={setOrigin}
+          onDay={setDay}
+          onClear={() => {
+            setHome(null);
+            setOrigin(null);
+            setLastSlot('home');
+          }}
+        />
+      ) : (
+        <RouteSearch
+          from={from}
+          to={to}
+          slot={slot}
+          onSlot={setSlot}
+          onFrom={(p) => {
+            setFrom(p);
+            if (p) setSlot('to');
+          }}
+          onTo={(p) => {
+            // 到着を入れた後も到着の欄のままにする（次に地図で選んだ駅で到着を入れ替えられる）
+            setTo(p);
+          }}
+          onSwap={() => {
+            setFrom(to);
+            setTo(from);
+          }}
+          onClear={() => {
+            setFrom(null);
+            setTo(null);
+            setSlot('from');
+          }}
+        />
+      )}
+    </>
+  );
+  const lineSelect = (
+    <LineSelect
+      value={focusRailways}
+      onChange={(ids) => {
+        // スマホではシートが路線を隠すので、路線を足したらシートを小さくする
+        if (ids.length > focusRailways.length && !desktop) setSheetSnap('peek');
+        setFocusRailways(ids);
+      }}
+    />
+  );
+  const routeResult = mode === 'route' && from && to ? <RouteResult route={route} from={from} to={to} /> : null;
+  const lastResult =
+    isLast && home ? (
+      <>
+        {timetable.status === 'loading' && <p className="text-sm text-slate-500">時刻表を読み込んでいます…</p>}
+        {timetable.status === 'error' && <p className="text-sm text-red-700">{timetable.message}</p>}
+        {timetable.status === 'ready' &&
+          (origin ? <LastTrainResult home={home} origin={origin} journey={journey} /> : <Legend />)}
+      </>
+    ) : null;
+  const playback = isSim && simRange && (
+    <PlaybackBar
+      start={simRange[0]}
+      end={simRange[1]}
+      time={simTime}
+      playing={playing}
+      speed={speed}
+      rows={simPositions.flatMap((p, i) => (p ? [{ index: i, status: p.status }] : []))}
+      onTime={setSimTime}
+      onPlay={setPlaying}
+      onSpeed={setSpeed}
+    />
+  );
+  const credit = 'データ: Mini Tokyo 3D / 公共交通オープンデータセンター';
+  /** シートを小さくしたときに見出しの下に出す 1 行 */
+  const summary = isSim
+    ? `経路 ${simRoutes.filter((r) => r.from && r.to).length} 本・${simBaseTime} ${simTimeKind === 'depart' ? '出発' : '到着'}`
+    : isLast
+      ? home
+        ? `帰る駅: ${home.ja}${origin ? `・今いる駅: ${origin.ja}` : ''}`
+        : '帰る駅を選んでください（地図の駅をタップしても選べます）'
+      : from && to
+        ? route
+          ? `${from.ja} → ${to.ja}・約 ${route.minutes} 分・乗換 ${route.transfers} 回`
+          : `${from.ja} → ${to.ja}`
+        : from
+          ? `${from.ja} → 到着駅を選んでください`
+          : '出発駅を選んでください（地図の駅をタップしても選べます）';
+  const sheetPx = sheetHeight(sheetSnap, viewportHeight);
+
   return (
     <main className="fixed inset-0">
       <RailMap
@@ -284,187 +465,98 @@ export default function App() {
         onPick={onPick}
         onPickRailway={onPickRailway}
         trains={isSim ? trains : undefined}
+        // 大きく広げているときは地図を見ていないので、中の高さで寄せる
+        bottomInset={desktop ? 0 : sheetHeight(sheetSnap === 'full' ? 'half' : sheetSnap, viewportHeight)}
       />
-      {/* スマホでは検索を上、結果を下に。PC では左上に縦に並べる */}
-      <div className="pointer-events-none absolute inset-0 flex flex-col justify-between gap-3 p-3 md:justify-start md:p-4">
-        <section
-          className={`panel pointer-events-auto w-full rounded-2xl bg-white/95 p-3 backdrop-blur md:p-4 ${isSim ? 'md:w-96' : 'md:w-80'} ${isSim ? 'max-h-[45vh] overflow-y-auto md:max-h-[calc(100vh-2rem)]' : ''}`}
-        >
-          <div className={`flex items-center gap-2 ${panelOpen ? 'mb-2 md:mb-3' : ''}`}>
-            <h1 className="flex min-w-0 flex-1 items-baseline gap-2">
-              <span className="text-lg font-bold whitespace-nowrap">首都圏 路線図</span>
-              <span className="hidden truncate text-[10px] font-semibold tracking-[0.15em] text-slate-400 sm:inline">
-                TOKYO RAIL MAP
-              </span>
-            </h1>
-            <button
-              type="button"
-              className="btn shrink-0 !px-2.5 !py-1 text-xs"
-              aria-expanded={panelOpen}
-              aria-controls="search-panel-body"
-              onClick={() => setPanelOpen((o) => !o)}
+      {desktop ? (
+        <>
+          <div className="pointer-events-none absolute inset-0 flex flex-col justify-start gap-3 p-4">
+            <section
+              className={`panel pointer-events-auto rounded-2xl bg-white/95 p-4 backdrop-blur ${isSim ? 'w-96 max-h-[calc(100vh-2rem)] overflow-y-auto' : 'w-80'}`}
             >
-              {panelOpen ? '閉じる ▴' : '開く ▾'}
-            </button>
-          </div>
-          <div id="search-panel-body" hidden={!panelOpen}>
-            <div role="tablist" className="mb-3 flex rounded-lg bg-slate-100 p-0.5 text-sm font-semibold">
-              {(
-                [
-                  ['route', '経路'],
-                  ['last', '終電'],
-                  ['sim', 'シミュレーション'],
-                ] as const
-              ).map(([value, label]) => (
+              <div className={`flex items-center gap-2 ${panelOpen ? 'mb-3' : ''}`}>
+                <h1 className="flex min-w-0 flex-1 items-baseline gap-2">
+                  <span className="text-lg font-bold whitespace-nowrap">首都圏 路線図</span>
+                  <span className="truncate text-[10px] font-semibold tracking-[0.15em] text-slate-400">
+                    TOKYO RAIL MAP
+                  </span>
+                </h1>
                 <button
-                  key={value}
                   type="button"
-                  role="tab"
-                  aria-selected={mode === value}
-                  className={`flex-auto rounded-md px-2 py-1.5 whitespace-nowrap ${mode === value ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}
-                  onClick={() => setMode(value)}
+                  className="btn shrink-0 !px-2.5 !py-1 text-xs"
+                  aria-expanded={panelOpen}
+                  aria-controls="search-panel-body"
+                  onClick={() => setPanelOpen((o) => !o)}
                 >
-                  {label}
+                  {panelOpen ? '閉じる ▴' : '開く ▾'}
                 </button>
-              ))}
-            </div>
-            {isSim ? (
-              <SimulationPanel
-                routes={simRoutes}
-                baseTime={simBaseTime}
-                day={day}
-                slot={simSlot}
-                state={sim}
-                choice={simChoice}
-                journeys={simJourneys}
-                customized={simRoutes.map((_, i) => Boolean(simCustom[i]))}
-                onResetCustom={(route) =>
-                  setSimCustom((cur) => {
-                    const next = [...cur];
-                    next[route] = null;
-                    return next;
-                  })
-                }
-                onCustomize={(route, journey) =>
-                  setSimCustom((cur) => {
-                    const next = [...cur];
-                    next[route] = journey;
-                    return next;
-                  })
-                }
-                onChoose={(route, index) =>
-                  setSimChoice((cur) => {
-                    const next = [...cur];
-                    next[route] = index;
-                    return next;
-                  })
-                }
-                onSlot={setSimSlot}
-                onChange={(i, patch) => {
-                  updateSimRoute(i, patch);
-                  if (patch.from) setSimSlot({ route: i, field: 'to' });
-                }}
-                onAdd={() => {
-                  if (simRoutes.length >= MAX_SIM_ROUTES) return;
-                  setSimRoutes((rs) => [...rs, newSimRoute()]);
-                  setSimSlot({ route: simRoutes.length, field: 'from' });
-                }}
-                onRemove={(i) => {
-                  setSimRoutes((rs) => rs.filter((_, j) => j !== i));
-                  setSimSlot({ route: 0, field: 'from' });
-                }}
-                onBaseTime={setSimBaseTime}
-                timeKind={simTimeKind}
-                onTimeKind={setSimTimeKind}
-                onDay={setDay}
-              />
-            ) : isLast ? (
-              <LastTrainSearch
-                home={home}
-                origin={origin}
-                day={day}
-                slot={lastSlot}
-                onSlot={setLastSlot}
-                onHome={(p) => {
-                  setHome(p);
-                  if (p) setLastSlot('origin');
-                }}
-                onOrigin={setOrigin}
-                onDay={setDay}
-                onClear={() => {
-                  setHome(null);
-                  setOrigin(null);
-                  setLastSlot('home');
-                }}
-              />
-            ) : (
-              <RouteSearch
-                from={from}
-                to={to}
-                slot={slot}
-                onSlot={setSlot}
-                onFrom={(p) => {
-                  setFrom(p);
-                  if (p) setSlot('to');
-                }}
-                onTo={(p) => {
-                  // 到着を入れた後も到着の欄のままにする（次に地図で選んだ駅で到着を入れ替えられる）
-                  setTo(p);
-                }}
-                onSwap={() => {
-                  setFrom(to);
-                  setTo(from);
-                }}
-                onClear={() => {
-                  setFrom(null);
-                  setTo(null);
-                  setSlot('from');
-                }}
-              />
+              </div>
+              <div id="search-panel-body" hidden={!panelOpen}>
+                {searchBody}
+                {lineSelect}
+              </div>
+            </section>
+            {panelOpen && routeResult && (
+              <section className="panel pointer-events-auto w-80 overflow-auto rounded-2xl bg-white/95 p-4 backdrop-blur">
+                {routeResult}
+              </section>
             )}
-            <LineSelect
-              value={focusRailways}
-              onChange={(ids) => {
-                // スマホではパネルが路線を隠すので、路線を足したら閉じる
-                if (ids.length > focusRailways.length && window.innerWidth < 768) setPanelOpen(false);
-                setFocusRailways(ids);
-              }}
-            />
+            {panelOpen && lastResult && (
+              <section className="panel pointer-events-auto max-h-[calc(100vh-26rem)] w-80 overflow-auto rounded-2xl bg-white/95 p-4 backdrop-blur">
+                {lastResult}
+              </section>
+            )}
           </div>
-        </section>
-        {mode === 'route' && panelOpen && from && to && (
-          <section className="panel pointer-events-auto max-h-[40vh] w-full overflow-auto rounded-2xl bg-white/95 p-4 backdrop-blur md:max-h-none md:w-80">
-            <RouteResult route={route} from={from} to={to} />
-          </section>
-        )}
-        {panelOpen && isLast && home && (
-          <section className="panel pointer-events-auto max-h-[40vh] w-full overflow-auto rounded-2xl bg-white/95 p-4 backdrop-blur md:max-h-[calc(100vh-26rem)] md:w-80">
-            {timetable.status === 'loading' && <p className="text-sm text-slate-500">時刻表を読み込んでいます…</p>}
-            {timetable.status === 'error' && <p className="text-sm text-red-700">{timetable.message}</p>}
-            {timetable.status === 'ready' &&
-              (origin ? <LastTrainResult home={home} origin={origin} journey={journey} /> : <Legend />)}
-          </section>
-        )}
-      </div>
-      {isSim && simRange && (
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center p-3 md:bottom-4 md:left-[26rem] md:justify-start md:p-0">
-          <PlaybackBar
-            start={simRange[0]}
-            end={simRange[1]}
-            time={simTime}
-            playing={playing}
-            speed={speed}
-            rows={simPositions.flatMap((p, i) => (p ? [{ index: i, status: p.status }] : []))}
-            onTime={setSimTime}
-            onPlay={setPlaying}
-            onSpeed={setSpeed}
-          />
-        </div>
+          {playback && (
+            <div className="pointer-events-none absolute right-0 bottom-4 left-[26rem] flex justify-start">
+              {playback}
+            </div>
+          )}
+          <p className="pointer-events-none absolute right-2 bottom-1 text-[10px] text-slate-400">
+            地下の路線は深さを強調して描いています（深さは目安）・{credit}
+          </p>
+        </>
+      ) : (
+        <>
+          {playback && sheetSnap !== 'full' && (
+            <div
+              className="pointer-events-none absolute inset-x-0 z-10 flex justify-center px-3 pr-[4.25rem]"
+              style={{ bottom: sheetPx + 8 }}
+            >
+              {playback}
+            </div>
+          )}
+          <BottomSheet
+            snap={sheetSnap}
+            onSnap={setSheetSnap}
+            viewportHeight={viewportHeight}
+            header={
+              <div className="min-w-0">
+                <h1 className="text-base leading-tight font-bold">首都圏 路線図</h1>
+                <p className="mt-0.5 truncate text-xs text-slate-500">{summary}</p>
+              </div>
+            }
+          >
+            {/* 駅名の入力欄を選んだら、キーボードと候補が収まるようにシートを広げる */}
+            <div
+              className="pt-1"
+              onFocusCapture={(e) => {
+                const t = e.target;
+                if (t instanceof HTMLInputElement && (t.type === 'text' || t.type === 'search')) setSheetSnap('full');
+              }}
+            >
+              {searchBody}
+            </div>
+            {(routeResult || lastResult) && (
+              <div className="mt-3 border-t border-slate-100 pt-3">{routeResult ?? lastResult}</div>
+            )}
+            {lineSelect}
+            <p className="mt-4 text-[10px] text-slate-400">
+              地下の路線は深さを強調して描いています（深さは目安）。{credit}
+            </p>
+          </BottomSheet>
+        </>
       )}
-      <p className="pointer-events-none absolute right-2 bottom-1 text-[10px] text-slate-400">
-        <span className="hidden md:inline">地下の路線は深さを強調して描いています（深さは目安）・</span>
-        データ: Mini Tokyo 3D / 公共交通オープンデータセンター
-      </p>
     </main>
   );
 }
