@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { graph, network, railwayById, stationById } from './data';
+import { graph, network, railwayById, region, stationById } from './data';
+import { REGIONS } from './data/regions';
 import { useSimulation } from './data/useSimulation';
 import { todayDayType, useTimetable } from './data/timetable';
 import { rememberStation } from './data/history';
@@ -288,7 +289,12 @@ export default function App() {
 
   const searchBody = (
     <>
-      <div role="tablist" className="mb-3 flex rounded-lg bg-slate-100 p-0.5 text-sm font-semibold">
+      {/* 時刻表の無い地域は経路だけ */}
+      <div
+        role="tablist"
+        hidden={!region.timetable}
+        className="mb-3 flex rounded-lg bg-slate-100 p-0.5 text-sm font-semibold"
+      >
         {(
           [
             ['route', '経路'],
@@ -437,7 +443,7 @@ export default function App() {
       onSpeed={setSpeed}
     />
   );
-  const credit = 'データ: Mini Tokyo 3D / 公共交通オープンデータセンター';
+  const credit = region.credit;
   /** シートを小さくしたときに見出しの下に出す 1 行 */
   const summary = isSim
     ? `経路 ${simRoutes.filter((r) => r.from && r.to).length} 本・${simBaseTime} ${simTimeKind === 'depart' ? '出発' : '到着'}`
@@ -476,10 +482,11 @@ export default function App() {
             >
               <div className={`flex items-center gap-2 ${panelOpen ? 'mb-3' : ''}`}>
                 <h1 className="flex min-w-0 flex-1 items-baseline gap-2">
-                  <span className="text-lg font-bold whitespace-nowrap">首都圏 路線図</span>
+                  <span className="text-lg font-bold whitespace-nowrap">{region.title}</span>
                   <span className="truncate text-[10px] font-semibold tracking-[0.15em] text-slate-400">
-                    TOKYO RAIL MAP
+                    {region.en}
                   </span>
+                  <RegionSelect />
                 </h1>
                 <button
                   type="button"
@@ -532,7 +539,10 @@ export default function App() {
             viewportHeight={viewportHeight}
             header={
               <div className="min-w-0">
-                <h1 className="text-base leading-tight font-bold">首都圏 路線図</h1>
+                <h1 className="flex items-center gap-2 text-base leading-tight font-bold">
+                  {region.title}
+                  <RegionSelect />
+                </h1>
                 <p className="mt-0.5 truncate text-xs text-slate-500">{summary}</p>
               </div>
             }
@@ -558,5 +568,26 @@ export default function App() {
         </>
       )}
     </main>
+  );
+}
+
+/** 地域の切り替え（地域が 1 つだけなら出さない）。選ぶとページを読み直す（main.tsx の hashchange） */
+function RegionSelect() {
+  if (REGIONS.length < 2) return null;
+  return (
+    <select
+      aria-label="地域"
+      className="rounded-md border border-slate-200 bg-white px-1.5 py-0.5 text-xs font-semibold text-slate-700"
+      value={region.id}
+      onChange={(e) => {
+        location.hash = e.target.value;
+      }}
+    >
+      {REGIONS.map((r) => (
+        <option key={r.id} value={r.id}>
+          {r.name}
+        </option>
+      ))}
+    </select>
   );
 }

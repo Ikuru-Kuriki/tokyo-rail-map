@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import DeckGL, { type DeckGLRef } from '@deck.gl/react';
 import { FlyToInterpolator, MapView, WebMercatorViewport, type MapViewState, type PickingInfo } from '@deck.gl/core';
-import { network, placeById, placeByStation, railwayById, railwaySymbol, stationById } from '../data';
+import { network, placeById, placeByStation, railwayById, railwaySymbol, region, stationById } from '../data';
 import { StationCode } from '../components/StationCode';
 import type { Route } from '../domain/route';
 import type { Place, Station } from '../domain/types';
@@ -13,11 +13,8 @@ import { sideViewFor } from './camera';
 import { BACKGROUND, depthScale, elevationOf } from './style';
 
 const INITIAL_VIEW: MapViewState = {
-  longitude: 139.7,
-  latitude: 35.6,
-  zoom: 9.7,
+  ...region.view,
   pitch: TILTED_PITCH,
-  bearing: -8,
   minZoom: 7.5,
   maxZoom: 17,
   maxPitch: 85,
@@ -213,7 +210,10 @@ export function RailMap({
   const zoomStep = Math.round(viewState.zoom * 4) / 4;
   const viewportSize = Math.min(width, height) || 900;
   const pitchStep = Math.round(viewState.pitch ?? 0);
-  const scale = useMemo(() => depthScale(zoomStep, viewportSize, pitchStep), [zoomStep, viewportSize, pitchStep]);
+  const scale = useMemo(
+    () => depthScale(zoomStep, viewportSize, pitchStep, region.view.latitude),
+    [zoomStep, viewportSize, pitchStep],
+  );
   const layers = useMemo(
     () =>
       buildLayers({

@@ -76,6 +76,30 @@ export const OVERRIDES: Record<string, string> = {
   'TokyoMetro.Hibiya:北千住': 'H22',
 };
 
+/**
+ * 関西の番号。N02 にも元データ（piuccio）にも関西の番号が無いので、順番に振られている路線だけ規則で付ける。
+ * JR 西日本や私鉄は欠番・飛び番があるので、確かな元データが手に入るまで付けない
+ */
+export const KANSAI_SEQUENTIAL: SequentialRule[] = [
+  { railway: 'JR-West.OsakaLoop', prefix: 'O', from: '天王寺', toward: '寺田町', start: 1 },
+  { railway: 'OsakaMetro.Midosuji', prefix: 'M', from: '江坂', toward: '東三国', start: 11 },
+  { railway: 'Kitakyu.NambokuLine', prefix: 'M', from: '箕面萱野', toward: '箕面船場阪大前', start: 6 },
+  { railway: 'OsakaMetro.Tanimachi', prefix: 'T', from: '大日', toward: '守口', start: 11 },
+  { railway: 'OsakaMetro.Yotsubashi', prefix: 'Y', from: '西梅田', toward: '肥後橋', start: 11 },
+  { railway: 'OsakaMetro.Chuo', prefix: 'C', from: '夢洲', toward: 'コスモスクエア', start: 9 },
+  { railway: 'OsakaMetro.Sennichimae', prefix: 'S', from: '野田阪神', toward: '玉川', start: 11 },
+  { railway: 'OsakaMetro.Sakaisuji', prefix: 'K', from: '天神橋筋六丁目', toward: '扇町', start: 11 },
+  { railway: 'OsakaMetro.Nagahori', prefix: 'N', from: '大正', toward: 'ドーム前千代崎', start: 11 },
+  { railway: 'OsakaMetro.Imazatosuji', prefix: 'I', from: '井高野', toward: '瑞光四丁目', start: 11 },
+  { railway: 'OsakaMetro.NewTram', prefix: 'P', from: 'コスモスクエア', toward: 'トレードセンター前', start: 9 },
+  { railway: 'KyotoSubway.Karasuma', prefix: 'K', from: '国際会館', toward: '松ヶ崎', start: 1 },
+  { railway: 'KyotoSubway.Tozai', prefix: 'T', from: '六地蔵', toward: '石田', start: 1 },
+  { railway: 'KobeSubway.SeishinYamate', prefix: 'S', from: '谷上', toward: '新神戸', start: 1 },
+  { railway: 'KobeSubway.Kaigan', prefix: 'K', from: '三宮・花時計前', toward: '旧居留地・大丸前', start: 1 },
+];
+
+export const KANSAI_OVERRIDES: Record<string, string> = {};
+
 export interface NumberingStation {
   id: string;
   ja: string;
