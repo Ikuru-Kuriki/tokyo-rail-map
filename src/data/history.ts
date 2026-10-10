@@ -1,12 +1,13 @@
 import { useSyncExternalStore } from 'react';
 import { addToHistory } from '../domain/history';
 import type { Place } from '../domain/types';
-import { placeById } from './index';
+import { placeById, region } from './index';
 
 /**
  * 最近使った駅。ブラウザの localStorage に保存する（使えない環境ではこの画面を開いている間だけ覚える）
  */
-const KEY = 'tokyo-rail-map:station-history';
+// 地域ごとに分ける（首都圏は前からのキーのまま）
+const KEY = region.id === 'tokyo' ? 'tokyo-rail-map:station-history' : `tokyo-rail-map:${region.id}:station-history`;
 
 function read(): string[] {
   try {

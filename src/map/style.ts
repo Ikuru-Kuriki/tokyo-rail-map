@@ -1,3 +1,5 @@
+import { region } from '../data';
+
 /** 地図の見た目の定数（方眼紙の地面＋地下に沈む地下鉄） */
 export const BACKGROUND = '#f3f1ec';
 /** 地下の深さ 1m を画面上で何ピクセルくらいに見せるか（引いた表示のとき） */
@@ -6,8 +8,8 @@ export const DEPTH_PIXELS_PER_METER = 6;
 export const GROUND_LIFT_PX = 0.5;
 /** 駅の点を線より少し上に置く（ピクセル）。線に埋もれないように */
 export const DOT_LIFT_PX = 0.5;
-/** グリッドを描く範囲（経度・緯度） */
-export const GRID_BOUNDS = { west: 138.95, east: 140.4, south: 35.1, north: 36.2 };
+/** グリッドを描く範囲（経度・緯度）。地域ごと（src/data/regions.ts） */
+export const GRID_BOUNDS = region.grid;
 export const GRID_STEP = 0.025;
 
 /** 描画の高さの尺度。exaggeration は深さの強調倍率、metersPerPixel は今のズームでの 1 ピクセルの長さ */
