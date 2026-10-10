@@ -11,7 +11,8 @@
     "test": "vitest run",
     "data": "node scripts/build-data.ts",
     "data:kansai": "node scripts/build-data-kansai.ts",
-    "timetable": "node scripts/build-timetable.ts"
+    "timetable": "node scripts/build-timetable.ts",
+    "ground": "node scripts/build-ground.ts"
   },
   "dependencies": {
     "@deck.gl/core": "^9.4.0",
@@ -21,11 +22,13 @@
     "react-dom": "^19.3.0"
   },
   "devDependencies": {
+    "@mapbox/vector-tile": "^2.0.4",
     "@tailwindcss/vite": "^4.3.3",
     "@types/node": "^26.6.4",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.1",
+    "pbf": "^4.0.1",
     "tailwindcss": "^4.3.3",
     "typescript": "^7.0.2",
     "vite": "^8.3.2",

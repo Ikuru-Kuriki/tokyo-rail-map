@@ -4,6 +4,8 @@ import { region } from '../data';
 export const BACKGROUND = '#f3f1ec';
 /** 地下の深さ 1m を画面上で何ピクセルくらいに見せるか（引いた表示のとき） */
 export const DEPTH_PIXELS_PER_METER = 6;
+/** 「乗換を見る」で寄ったときの深さの強調（実際の深さの何倍で描くか） */
+export const TRANSFER_EXAGGERATION = 3;
 /** 地上の路線を地面から浮かせる高さ（ピクセル）。方眼の線と重なってちらつかないように */
 export const GROUND_LIFT_PX = 0.5;
 /** 駅の点を線より少し上に置く（ピクセル）。線に埋もれないように */

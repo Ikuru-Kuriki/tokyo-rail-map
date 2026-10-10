@@ -33,7 +33,7 @@ export const TOKYO: Region = {
   grid: { west: 138.95, east: 140.4, south: 35.1, north: 36.2 },
   timetable: true,
   example: '新宿 / shinjuku',
-  credit: 'データ: Mini Tokyo 3D / 公共交通オープンデータセンター',
+  credit: 'データ: Mini Tokyo 3D / 公共交通オープンデータセンター / 国土地理院ベクトルタイル（乗換の地上）',
 };
 
 export const KANSAI: Region = {

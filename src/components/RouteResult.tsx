@@ -7,9 +7,13 @@ interface Props {
   route: Route | null;
   from: Place;
   to: Place;
+  /** i 番目の乗換（legs[i - 1] → legs[i]）を地図で寄って見る */
+  onShowTransfer?: (i: number) => void;
+  /** 今見ている乗換 */
+  shownTransfer?: number | null;
 }
 
-export function RouteResult({ route, from, to }: Props) {
+export function RouteResult({ route, from, to, onShowTransfer, shownTransfer = null }: Props) {
   if (!route) {
     return <p className="text-sm text-slate-500">経路が見つかりませんでした。</p>;
   }
@@ -39,8 +43,18 @@ export function RouteResult({ route, from, to }: Props) {
                 style={{ background: railway.color }}
               />
               <span className="absolute top-1 left-0.5 h-4 w-4 rounded-full border-2 border-slate-900 bg-white" />
-              <div className="pb-1 font-semibold">
+              <div className="flex items-center gap-2 pb-1 font-semibold">
                 <StationName id={first.id} />
+                {i > 0 && onShowTransfer && (
+                  <button
+                    type="button"
+                    className={`shrink-0 rounded-md border px-1.5 py-0.5 text-[11px] font-semibold ${shownTransfer === i ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-300 bg-white text-slate-600 hover:bg-slate-50'}`}
+                    aria-pressed={shownTransfer === i}
+                    onClick={() => onShowTransfer(i)}
+                  >
+                    乗換を見る
+                  </button>
+                )}
               </div>
               <div className="pb-2 text-sm text-slate-500">
                 <span className="font-semibold" style={{ color: railway.color }}>
