@@ -8,6 +8,7 @@ import { journeyToRoute } from './domain/journeyRoute';
 import { buildFootpaths, formatMinutes, journeyFrom, scanLastTrains } from './domain/lastTrain';
 import { bucketOf } from './domain/lastTrainColors';
 import { findRoute } from './domain/route';
+import { transfersOf } from './domain/ground';
 import type { DayType } from './domain/timetableTypes';
 import type { Place } from './domain/types';
 import { RailMap } from './map/RailMap';
@@ -77,8 +78,11 @@ export default function App() {
   // 経路が出たら、スマホではシートを小さくして地図を見せる。
   // 地図が経路に寄せるときにシートの高さを使うので、effect ではなく描画中に切り替える
   const [shownRoute, setShownRoute] = useState(route);
+  /** 地図で寄って見ている乗換（経路の legs[i - 1] → legs[i] の i）。経路が変わったらやめる */
+  const [transferIndex, setTransferIndex] = useState<number | null>(null);
   if (route !== shownRoute) {
     setShownRoute(route);
+    setTransferIndex(null);
     if (route && !desktop) setSheetSnap('peek');
   }
 
@@ -420,7 +424,26 @@ export default function App() {
       }}
     />
   );
-  const routeResult = mode === 'route' && from && to ? <RouteResult route={route} from={from} to={to} /> : null;
+  const routeResult =
+    mode === 'route' && from && to ? (
+      <RouteResult
+        route={route}
+        from={from}
+        to={to}
+        shownTransfer={transferIndex}
+        onShowTransfer={(i) => {
+          setTransferIndex(i);
+          // スマホではシートが地図を隠すので小さくする
+          if (!desktop) setSheetSnap('peek');
+        }}
+      />
+    ) : null;
+  // 地図は乗換が変わったときだけ寄せ直すので、同じ乗換なら同じものを渡す
+  const transfer = useMemo(
+    () =>
+      mode === 'route' && route && transferIndex !== null ? (transfersOf(route.legs)[transferIndex - 1] ?? null) : null,
+    [mode, route, transferIndex],
+  );
   const lastResult =
     isLast && home ? (
       <>
@@ -471,6 +494,8 @@ export default function App() {
         onPick={onPick}
         onPickRailway={onPickRailway}
         trains={isSim ? trains : undefined}
+        transfer={transfer}
+        onCloseTransfer={() => setTransferIndex(null)}
         // 大きく広げているときは地図を見ていないので、中の高さで寄せる
         bottomInset={desktop ? 0 : sheetHeight(sheetSnap === 'full' ? 'half' : sheetSnap, viewportHeight)}
       />

@@ -6,6 +6,8 @@ import { StationCode } from '../components/StationCode';
 import type { Route } from '../domain/route';
 import type { Place, Station } from '../domain/types';
 import { buildHoverLayers, buildLayers, type HoverTarget, type TrainMarker } from './layers';
+import { buildTransferLayers, type TransferViewState } from './transferLayers';
+import type { Ground } from '../domain/ground';
 import { minLabelPriority, placeLabels, type LabelCandidate, type LabelDensity } from './labels';
 import { MapControls, TILTED_PITCH } from './MapControls';
 import { COARSE_QUERY, DESKTOP_QUERY, useMediaQuery } from '../hooks/useMediaQuery';
@@ -87,6 +89,23 @@ interface Props {
   trains?: TrainMarker[];
   /** 画面の下を覆っているものの高さ（スマホのシート）。経路に寄せるときと、操作ボタンの位置に使う */
   bottomInset?: number;
+  /** 寄って見る乗換（前・後の駅）。地上の建物・道路と地下のホームを立体で出す */
+  transfer?: { from: string; to: string } | null;
+  onCloseTransfer?: () => void;
+}
+
+/** 乗換駅のまわりの地上のデータ（public/ground/{place}.json）。一度読んだものは覚えておく */
+const groundCache = new Map<string, Promise<Ground | null>>();
+function loadGround(placeId: string): Promise<Ground | null> {
+  let p = groundCache.get(placeId);
+  if (!p) {
+    p = fetch(`${import.meta.env.BASE_URL}ground/${encodeURIComponent(encodeURIComponent(placeId))}.json`)
+      .then((res) => (res.ok ? (res.json() as Promise<Ground>) : null))
+      // 読めなくても地下のホームだけで出す
+      .catch(() => null);
+    groundCache.set(placeId, p);
+  }
+  return p;
 }
 
 function useSize(ref: React.RefObject<HTMLDivElement | null>) {
@@ -113,6 +132,8 @@ export function RailMap({
   onPickRailway,
   trains = NO_TRAINS,
   bottomInset = 0,
+  transfer = null,
+  onCloseTransfer,
 }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const deck = useRef<DeckGLRef>(null);
@@ -139,6 +160,23 @@ export function RailMap({
     const t = setTimeout(() => setRailCard(null), 4000);
     return () => clearTimeout(t);
   }, [railCard]);
+
+  const [grounds, setGrounds] = useState<TransferViewState['grounds']>([]);
+  useEffect(() => {
+    setGrounds([]);
+    if (!transfer) return;
+    let alive = true;
+    const places = [...new Set([transfer.from, transfer.to].map((id) => placeByStation.get(id)!))];
+    // 地上のデータは region が首都圏のときだけある（関西はまだ作っていない）
+    if (region.id !== 'tokyo') return;
+    void Promise.all(places.map((p) => loadGround(p.id))).then((gs) => {
+      if (!alive) return;
+      setGrounds(places.flatMap((p, i) => (gs[i] ? [{ center: p.coord, ground: gs[i]! }] : [])));
+    });
+    return () => {
+      alive = false;
+    };
+  }, [transfer]);
 
   const fly = (patch: Partial<MapViewState>) =>
     setViewState((v) => ({ ...v, ...patch, transitionDuration: 400, transitionInterpolator: new FlyToInterpolator() }));
@@ -173,9 +211,25 @@ export function RailMap({
     setViewState((v) => ({ ...v, ...view, transitionDuration: 1200, transitionInterpolator: new FlyToInterpolator() }));
   }, [focusRailways, width]);
 
-  // 経路が決まったら、経路全体が見えるようにカメラを寄せる
+  // 乗換を見るときは、その駅に寄って斜めから見る（前後の駅の真ん中）
   useEffect(() => {
-    if (!route || route.legs.length === 0 || !width || !height) return;
+    if (!transfer) return;
+    const a = stationById.get(transfer.from)!.coord;
+    const b = stationById.get(transfer.to)!.coord;
+    setViewState((v) => ({
+      ...v,
+      longitude: (a[0] + b[0]) / 2,
+      latitude: (a[1] + b[1]) / 2,
+      zoom: 16.6,
+      pitch: 62,
+      transitionDuration: 1200,
+      transitionInterpolator: new FlyToInterpolator(),
+    }));
+  }, [transfer]);
+
+  // 経路が決まったら（乗換を見るのをやめたときも）、経路全体が見えるようにカメラを寄せる
+  useEffect(() => {
+    if (transfer || !route || route.legs.length === 0 || !width || !height) return;
     const coords = route.legs.flatMap((l) => l.stations.map((id) => stationById.get(id)!.coord));
     const lons = coords.map((c) => c[0]);
     const lats = coords.map((c) => c[1]);
@@ -204,7 +258,7 @@ export function RailMap({
     }));
     // シートの高さが変わるたびには寄せ直さない
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [route, width, height]);
+  }, [route, width, height, transfer]);
 
   // 深さの強調倍率はズーム 0.25 刻みで変える（毎フレーム作り直さないように）
   const zoomStep = Math.round(viewState.zoom * 4) / 4;
@@ -234,7 +288,22 @@ export function RailMap({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [hoverKey, scale],
   );
-  const allLayers = useMemo(() => [...layers, ...hoverLayers], [layers, hoverLayers]);
+  const transferLayers = useMemo(
+    () => (transfer ? buildTransferLayers({ ...transfer, grounds }, scale) : []),
+    [transfer, grounds, scale],
+  );
+  // 乗換の地上（建物・道路）は地面と方眼の後に、ホームと歩く線は経路より手前に描く（layers.ts の描く順番）
+  const allLayers = useMemo(() => {
+    const at = layers.findIndex((l) => l.id === 'interchange-outline');
+    const isGround = (l: { id: string }) => l.id === 'transfer-roads' || l.id === 'transfer-buildings';
+    return [
+      ...layers.slice(0, at),
+      ...transferLayers.filter(isGround),
+      ...layers.slice(at),
+      ...transferLayers.filter((l) => !isGround(l)),
+      ...hoverLayers,
+    ];
+  }, [layers, transferLayers, hoverLayers]);
   // シミュレーションの電車は駅名ラベルより手前に出すため、HTML で重ねる（位置は線路の高さで投影）
   const trainMarkers = useMemo(() => {
     if (!width || !height || trains.length === 0) return [];
@@ -416,6 +485,7 @@ export function RailMap({
           />
         ))}
       </div>
+      {transfer && <TransferBar transfer={transfer} top={desktop ? 16 : 76} onClose={() => onCloseTransfer?.()} />}
       <MapControls
         pitch={viewState.pitch ?? 0}
         bearing={viewState.bearing ?? 0}
@@ -477,6 +547,38 @@ function RailwayCard({
         </button>
         <button type="button" className="h-9 w-9 shrink-0 text-slate-400" aria-label="閉じる" onClick={onClose}>
           ×
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** 乗換を見ているときに上に出すバー: どの駅のどの乗換か と「経路全体に戻る」 */
+function TransferBar({
+  transfer,
+  top,
+  onClose,
+}: {
+  transfer: { from: string; to: string };
+  top: number;
+  onClose: () => void;
+}) {
+  const from = stationById.get(transfer.from)!;
+  const to = stationById.get(transfer.to)!;
+  const line = (s: Station) => railwayById.get(s.railway)!;
+  const place = (s: Station) => placeByStation.get(s.id)!.ja;
+  const name = place(from) === place(to) ? place(from) : `${place(from)} → ${place(to)}`;
+  return (
+    <div className="pointer-events-none absolute inset-x-0 z-10 flex justify-center px-3" style={{ top }}>
+      <div className="panel pointer-events-auto flex max-w-full items-center gap-2 rounded-xl bg-white/95 py-1.5 pr-1.5 pl-3 text-sm backdrop-blur md:ml-[360px]">
+        <span className="shrink-0 font-bold">{name}</span>
+        <span className="flex min-w-0 items-center gap-1 truncate text-xs font-semibold">
+          <span style={{ color: line(from).color }}>{line(from).ja}</span>
+          <span className="text-slate-400">→</span>
+          <span style={{ color: line(to).color }}>{line(to).ja}</span>
+        </span>
+        <button type="button" className="btn shrink-0 !py-2 text-xs" onClick={onClose}>
+          経路全体に戻る
         </button>
       </div>
     </div>
